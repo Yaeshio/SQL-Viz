@@ -68,6 +68,24 @@ SQL の対応範囲を広げる場合（例：`UPDATE`、`JOIN`、複合 `WHERE`
 `@supabase/supabase-js` は依存関係として存在するが、現時点では
 `src/` 内のどこからも利用されていない。
 
+## Git / GitHub 運用上の注意
+
+本リポジトリは **Public** かつ GitHub CLI（`gh`）で認証済みの状態で作業される。
+以下の破壊的・不可逆な操作は、ユーザーからの明示的な指示がない限り実行しない：
+
+- `git push --force` / `--force-with-lease`（特に `main` ブランチへの force push）
+- `git reset --hard`、`git clean -f`、`git checkout -- .` / `git restore .`
+- コミット済み（特にpush済み）のコミットの `git commit --amend`
+- ブランチの削除（`git branch -D` 等）
+- `gh repo delete`、`gh repo edit --visibility`（公開範囲の変更）
+- Issue/PRのクローズや削除、他者のコメントの編集・削除
+- `--no-verify` によるフック無視、`--no-gpg-sign` 等の署名回避
+
+`git push`、`gh pr create`、`gh issue create` はリポジトリが Public であるため
+即座に一般公開される。実行前に差分・内容を確認し、意図しないファイル
+（例：ルート直下に生成されがちな検証用スクリプト）が含まれていないか
+チェックすること。
+
 ## デザインの方針
 
 プロジェクトの元々のスキャフォールディング用プロンプト（`.bolt/prompt`）より：
