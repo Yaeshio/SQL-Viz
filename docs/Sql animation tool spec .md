@@ -122,6 +122,9 @@ function visualizeSQL(
 
 方言固有構文（MySQL/PostgreSQL独自拡張など）は非対応とし、ANSI標準に近いサブセットのみサポートする旨を明記する。
 
+Phase 1の範囲がなぜこの構文に絞って選定されたか、想定ユーザーとその目的については
+[user-stories.md](./user-stories.md) を参照。
+
 ## 8. UI構成（画面レイアウト）
 
 ```
