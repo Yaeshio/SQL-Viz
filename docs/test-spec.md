@@ -194,9 +194,16 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 
 ## 9. 非スコープ・既知の制約
 
-- `UPDATE` / `DELETE` / `JOIN` は非対応（`parser.ts` が `Unsupported statement type`
-  エラーを返す）。
-- `WHERE` 句における `AND` / `OR` などの複合条件は非対応（`parseWhere` が `null` を返す）。
+- `UPDATE` / `DELETE` / `ALTER TABLE` は非対応（`parser.ts` が
+  `Unsupported statement type` エラーを返す）。
+- `JOIN`・複合 `WHERE`（`AND`/`OR`/`LIKE`/`IN`/`BETWEEN`等）・`UNION`・`DISTINCT`・
+  `HAVING`・`GROUP BY`/`ORDER BY`/`LIMIT`・`WITH`句(CTE)・`FROM`句のサブクエリ・
+  集約関数/エイリアス付き列・`CREATE TABLE ... AS SELECT`・`CREATE TABLE IF NOT EXISTS`・
+  `PRIMARY KEY`/`INDEX`/`FOREIGN KEY`等の制約定義・`INSERT ... SELECT`・
+  `INSERT ... ON DUPLICATE KEY UPDATE` は非対応であり、いずれも `parser.ts` が
+  `Unsupported clause: <該当フィールド名>` エラーを返す（Issue #3 により、個別の
+  構文を都度検知するのではなく、サポート対象の形以外を汎用的に拒否する許可リスト
+  方式で実装されている）。
 - E2E テストは Issue #001 にて明示的に対象外とされている。
 - UI コンポーネント（`Canvas.tsx`/`App.tsx`）のレンダリングテストは、今回の対象層の
   スコープには含まれないと解釈し対象外とする（将来の検討事項）。

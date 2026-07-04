@@ -29,6 +29,17 @@ describe('parseSql — CREATE TABLE', () => {
     const stmt = statements[0] as ParsedCreate;
     expect(stmt.columns[0].type).toBe(expected);
   });
+
+  it.each([
+    ['IF NOT EXISTS', 'CREATE TABLE IF NOT EXISTS a (id INT)'],
+    ['AS SELECT', 'CREATE TABLE a AS SELECT * FROM b'],
+    ['INDEX定義', 'CREATE TABLE a (id INT, INDEX idx_id (id))'],
+    ['FOREIGN KEY制約', 'CREATE TABLE a (id INT, FOREIGN KEY (id) REFERENCES b(id))'],
+  ])('%s を含むCREATE TABLEはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
 });
 
 describe('parseSql — INSERT', () => {
@@ -61,6 +72,18 @@ describe('parseSql — INSERT', () => {
     const stmt = statements[0] as ParsedInsert;
     expect(stmt.rows[0]).toEqual([1, 'x', true, null]);
   });
+
+  it('INSERT ... SELECT はエラーになる（黙って0件挿入されない）', () => {
+    const { statements, error } = parseSql('INSERT INTO a SELECT * FROM b');
+    expect(statements).toEqual([]);
+    expect(error).toBe('Unsupported clause: INSERT ... SELECT');
+  });
+
+  it('ON DUPLICATE KEY UPDATE はエラーになる', () => {
+    const { statements, error } = parseSql("INSERT INTO a (id) VALUES (1) ON DUPLICATE KEY UPDATE id = 2");
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
 });
 
 describe('parseSql — SELECT', () => {
@@ -83,11 +106,55 @@ describe('parseSql — SELECT', () => {
     expect(stmt.where).toEqual({ column: 'id', operator: '>', value: 1 });
   });
 
-  it('AND/OR を含む複合条件はエラーにならず where が null になる', () => {
-    const { statements, error } = parseSql('SELECT * FROM users WHERE id = 1 AND name = \'Alice\'');
-    expect(error).toBeUndefined();
-    const stmt = statements[0] as ParsedSelect;
-    expect(stmt.where).toBeNull();
+  it.each([
+    ['AND/ORを含む複合条件', "SELECT * FROM users WHERE id = 1 AND name = 'Alice'"],
+    ['LIKE', "SELECT * FROM users WHERE name LIKE '%A%'"],
+    ['IN', 'SELECT * FROM users WHERE id IN (1, 2, 3)'],
+    ['BETWEEN', 'SELECT * FROM users WHERE id BETWEEN 1 AND 3'],
+    ['IS NULL', 'SELECT * FROM users WHERE name IS NULL'],
+    ['列同士の比較', 'SELECT * FROM users WHERE id = name'],
+  ])('%s を含むWHEREはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toBe('Unsupported clause: WHERE');
+  });
+
+  it('JOINを含むSELECTはエラーになる', () => {
+    const { statements, error } = parseSql('SELECT * FROM users JOIN orders ON users.id = orders.user_id');
+    expect(statements).toEqual([]);
+    expect(error).toBe('Unsupported clause: JOIN');
+  });
+
+  it('カンマ区切りの複数FROMテーブルはエラーになる', () => {
+    const { statements, error } = parseSql('SELECT * FROM users, orders');
+    expect(statements).toEqual([]);
+    expect(error).toBe('Unsupported clause: JOIN');
+  });
+
+  it('FROM句のサブクエリはエラーになる', () => {
+    const { statements, error } = parseSql('SELECT * FROM (SELECT * FROM users) t');
+    expect(statements).toEqual([]);
+    expect(error).toBe('Unsupported clause: subquery in FROM');
+  });
+
+  it('集約関数・エイリアス付き列はエラーになる', () => {
+    const { statements, error } = parseSql('SELECT COUNT(*) FROM users');
+    expect(statements).toEqual([]);
+    expect(error).toBe('Unsupported clause: SELECT column expression');
+  });
+
+  it.each([
+    ['UNION', 'SELECT id FROM users UNION SELECT id FROM orders'],
+    ['DISTINCT', 'SELECT DISTINCT id FROM users'],
+    ['HAVING', 'SELECT id FROM users HAVING id > 1'],
+    ['GROUP BY', 'SELECT id FROM users GROUP BY id'],
+    ['ORDER BY', 'SELECT id FROM users ORDER BY id'],
+    ['LIMIT', 'SELECT id FROM users LIMIT 1'],
+    ['WITH（CTE）', 'WITH x AS (SELECT id FROM users) SELECT id FROM x'],
+  ])('%s を含むSELECTはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
   });
 });
 
