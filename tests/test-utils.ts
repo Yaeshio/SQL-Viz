@@ -62,3 +62,15 @@ export function runSqlStatements(sqlList: string[]): { state: DBState; events: A
   }
   return results;
 }
+
+/** state.order 上の全テーブルについて、layoutTables() 後の (x, y) ペアに重複がないか調べる。 */
+export function hasOverlappingTablePositions(state: DBState): boolean {
+  const seen = new Set<string>();
+  for (const name of state.order) {
+    const { x, y } = state.tables[name];
+    const key = `${x},${y}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+}

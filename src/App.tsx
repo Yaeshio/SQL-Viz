@@ -1,17 +1,9 @@
 import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
 import { Play, Database, Terminal, Trash2, ChevronRight } from 'lucide-react';
 import Canvas from './Canvas';
-import { parseSql } from './parser';
-import { diffStates } from './diff';
-import { layoutTables } from './layout';
+import { runPipeline } from './runner';
 import type { AnimationEvent, DBState } from './types';
-import {
-  applyCreateTable,
-  applyInsert,
-  applySelect,
-  cloneState,
-  emptyState,
-} from './reducer';
+import { emptyState } from './reducer';
 
 const SAMPLE = `CREATE TABLE users (id INT, name VARCHAR(50), email VARCHAR(120));
 
@@ -84,12 +76,12 @@ export default function App() {
 
   const run = useCallback(async () => {
     setError(null);
-    const { statements, error: parseError } = parseSql(sql);
+    const { results, parseError } = runPipeline(sql, state, canvasRef.current?.clientWidth ?? 800);
     if (parseError) {
       setError(parseError);
       return;
     }
-    if (statements.length === 0) {
+    if (results.length === 0) {
       setError('No executable statements found.');
       return;
     }
@@ -100,53 +92,15 @@ export default function App() {
     setAppearingRows(new Set());
     setFilteringRows(new Set());
 
-    let current = state;
-    for (const stmt of statements) {
-      let next: DBState;
-      let label: string;
-      if (stmt.type === 'create') {
-        const res = applyCreateTable(current, stmt.table, stmt.columns);
-        next = res.state;
-        label = `CREATE TABLE ${stmt.table} (${stmt.columns.length} cols)`;
-        if (res.error) {
-          setError(res.error);
-          setPlaying(false);
-          return;
-        }
-      } else if (stmt.type === 'insert') {
-        let res: { state: DBState; error?: string } = { state: current };
-        for (const row of stmt.rows) {
-          res = applyInsert(res.state, stmt.table, stmt.columns, row);
-          if (res.error) break;
-        }
-        next = res.state;
-        label = `INSERT INTO ${stmt.table} (${stmt.rows.length} row${stmt.rows.length > 1 ? 's' : ''})`;
-        if (res.error) {
-          setError(res.error);
-          setPlaying(false);
-          return;
-        }
-      } else {
-        const res = applySelect(current, stmt.table, stmt.columns, stmt.where);
-        next = res.state;
-        const w = stmt.where ? ` WHERE ${stmt.where.column} ${stmt.where.operator} ${String(stmt.where.value)}` : '';
-        label = `SELECT ${stmt.columns.join(', ')} FROM ${stmt.table}${w}`;
-        if (res.error) {
-          setError(res.error);
-          setPlaying(false);
-          return;
-        }
+    for (const r of results) {
+      if (r.error) {
+        setError(r.error);
+        setPlaying(false);
+        return;
       }
-
-      // layout the next state using canvas width
-      const w = canvasRef.current?.clientWidth ?? 800;
-      next = layoutTables(cloneState(next), w);
-
-      const events = diffStates(current, next);
-      pushLog(label);
-      dispatch({ type: 'set', state: next });
-      await playEvents(events);
-      current = next;
+      pushLog(r.label);
+      dispatch({ type: 'set', state: r.state });
+      await playEvents(r.events);
     }
     setPlaying(false);
   }, [sql, state, pushLog, playEvents]);
