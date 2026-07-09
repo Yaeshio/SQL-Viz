@@ -15,11 +15,11 @@ export default function TableRow({ table, row, y, appearing, filtering }: Props)
   const dimmed = row.filteredOut;
   return (
     <motion.g
-      transform={`translate(0, ${y})`}
-      initial={appearing ? { opacity: 0, x: -24, scale: 0.9 } : false}
+      initial={appearing ? { opacity: 0, x: -24, y, scale: 0.9 } : false}
       animate={{
         opacity: dimmed ? 0.18 : 1,
         x: 0,
+        y,
         scale: 1,
       }}
       exit={{ opacity: 0, scale: 0.8 }}
