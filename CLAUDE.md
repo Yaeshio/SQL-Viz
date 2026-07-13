@@ -10,9 +10,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview` — 本番ビルドのプレビュー
 - `npm run lint` — プロジェクト全体への ESLint 実行
 - `npm run typecheck` — `tsc --noEmit -p tsconfig.app.json`
+- `npm test` — `vitest run`（`tests/**/*.test.ts` を実行）
+- `npm run test:watch` — `vitest`（watch モード）
 
-テストフレームワークは設定されていない（`test` スクリプトも Jest/Vitest 等の
-依存関係も無い）。利用可能な静的チェックは `typecheck` と `lint` のみ。
+テストフレームワークは Vitest（`vitest.config.ts`）。テストは `tests/`
+配下にフラット配置され、`src/` 直下の純粋ロジック層を相対パスで直接
+import する。
 
 ## アーキテクチャ
 
@@ -93,6 +96,18 @@ SQL の対応範囲を広げる場合（例：`UPDATE`、`JOIN`、複合 `WHERE`
 ルーティング（AppRouter構成）は Issue #4 で検討したが導入を見送った。
 理由・再検討条件は [docs/routing-decision.md](docs/routing-decision.md)
 を参照。
+
+## CI/CD
+
+`main` 向け PR と `main` への push を対象に、GitHub Actions
+（[.github/workflows/ci.yml](.github/workflows/ci.yml)）が
+`typecheck` / `lint` / `test` / `build` を実行する（E2E 等の重量級テストは
+対象外、Issue #10）。`main` には branch protection rule が設定されており、
+この CI（job: `build-and-check`）が成功しないとマージできない。
+
+デプロイ（CD）は GitHub Actions では行わず、Vercel のネイティブ Git 連携に
+委ねている（PR ごとの Preview Deployment、`main` マージ時の Production
+Deployment はいずれも Vercel 側が自動で行う）。
 
 ## Git / GitHub 運用上の注意
 
