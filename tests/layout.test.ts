@@ -73,7 +73,7 @@ describe('TABLE_H — テーブルの高さ計算', () => {
 });
 
 describe('layoutTables — 同一行内の高さ計算（特性テスト）', () => {
-  it('LAYOUT-Y-01: 同じ行に並ぶテーブルでも y は他テーブルの高さを考慮せず自身の TABLE_H のみで決まる（行内で最大高さに揃える処理は無い、既存実装の挙動を固定）', () => {
+  it('LAYOUT-Y-01: 同じ行に並ぶテーブルは行内の最大高さに揃えて次の行が配置される（テーブル同士の重なり防止）', () => {
     const state = makeState([
       tableWithShape('t0', 1, 0),
       tableWithShape('t1', 1, 0),
@@ -87,10 +87,12 @@ describe('layoutTables — 同一行内の高さ計算（特性テスト）', ()
     const tallH = TABLE_H(state.tables.tall);
     expect(shortH).not.toBe(tallH);
 
-    expect(state.tables.short.y).toBe(PAD + (shortH + TABLE_GAP_Y));
-    expect(state.tables.tall.y).toBe(PAD + (tallH + TABLE_GAP_Y));
-    // 同じ行 (row=1) にもかかわらず y が異なる = 行内の最大高さに揃えていないことの証拠
-    expect(state.tables.short.y).not.toBe(state.tables.tall.y);
+    const row0H = TABLE_H(state.tables.t0);
+    const expectedRow1Y = PAD + (row0H + TABLE_GAP_Y);
+    expect(state.tables.short.y).toBe(expectedRow1Y);
+    expect(state.tables.tall.y).toBe(expectedRow1Y);
+    // 同じ行 (row=1) の y は一致する = 行内で最大高さに揃えて重なりを防いでいることの証拠
+    expect(state.tables.short.y).toBe(state.tables.tall.y);
   });
 });
 
