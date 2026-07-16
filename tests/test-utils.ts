@@ -1,7 +1,7 @@
-import { parseSql } from '../src/parser';
-import { applyCreateTable, applyInsert, applySelect, emptyState } from '../src/reducer';
-import { diffStates } from '../src/diff';
+import { PgEngine } from '../src/pglite/engine';
 import type { AnimationEvent, Column, ColumnType, DBState, Row, Table } from '../src/types';
+
+const CANVAS_W = 800;
 
 export const SAMPLE_CREATE_USERS = 'CREATE TABLE users (id INT, name VARCHAR(50))';
 
@@ -27,37 +27,20 @@ export function makeState(tables: Table[], order?: string[], lastSelect: DBState
 }
 
 /**
- * SQL文字列の配列を順に実行し、文ごとに生成されたイベント列を返す。
- * layoutTables() は挟まない（diffStates は x/y 座標を参照しないため）。
- * apply* 系がエラーを返した場合は throw し、それ以降の文は処理しない
+ * SQL文字列の配列を、新規 PgEngine 上で順に実行し（各文字列内に複数文を
+ * 含んでもよい）、文ごとに生成されたイベント列を返す。engine が
+ * エラーを返した場合は throw し、それ以降の文は処理しない
  * （EVENT-07 のテストで使う挙動）。
  */
-export function runSqlStatements(sqlList: string[]): { state: DBState; events: AnimationEvent[] }[] {
-  let current = emptyState();
+export async function runSqlStatements(sqlList: string[]): Promise<{ state: DBState; events: AnimationEvent[] }[]> {
+  const engine = new PgEngine();
   const results: { state: DBState; events: AnimationEvent[] }[] = [];
   for (const sql of sqlList) {
-    const { statements, error } = parseSql(sql);
-    if (error) throw new Error(error);
-    for (const stmt of statements) {
-      let next: DBState;
-      if (stmt.type === 'create') {
-        const result = applyCreateTable(current, stmt.table, stmt.columns);
-        if (result.error) throw new Error(result.error);
-        next = result.state;
-      } else if (stmt.type === 'insert') {
-        next = current;
-        for (const row of stmt.rows) {
-          const result = applyInsert(next, stmt.table, stmt.columns, row);
-          if (result.error) throw new Error(result.error);
-          next = result.state;
-        }
-      } else {
-        const result = applySelect(current, stmt.table, stmt.columns, stmt.where);
-        if (result.error) throw new Error(result.error);
-        next = result.state;
-      }
-      results.push({ state: next, events: diffStates(current, next) });
-      current = next;
+    const { results: stmtResults, parseError } = await engine.run(sql, CANVAS_W);
+    if (parseError) throw new Error(parseError);
+    for (const r of stmtResults) {
+      if (r.error) throw new Error(r.error);
+      results.push({ state: r.state, events: r.events });
     }
   }
   return results;

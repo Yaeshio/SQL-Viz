@@ -6,11 +6,12 @@ interface Props {
   onSqlChange: (value: string) => void;
   error: string | null;
   playing: boolean;
+  initializing: boolean;
   onRun: () => void;
   log: string[];
 }
 
-export default function SqlEditorPane({ sql, onSqlChange, error, playing, onRun, log }: Props) {
+export default function SqlEditorPane({ sql, onSqlChange, error, playing, initializing, onRun, log }: Props) {
   return (
     <section className="w-[420px] shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/40">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-500">
@@ -31,10 +32,10 @@ export default function SqlEditorPane({ sql, onSqlChange, error, playing, onRun,
       <div className="p-3 border-t border-slate-800 flex items-center gap-2">
         <button
           onClick={onRun}
-          disabled={playing}
+          disabled={playing || initializing}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-semibold text-sm transition"
         >
-          <Play size={15} /> {playing ? 'Running…' : 'Run SQL'}
+          <Play size={15} /> {initializing ? 'エンジン読込中…' : playing ? 'Running…' : 'Run SQL'}
         </button>
       </div>
       <ExecutionLogPanel log={log} />

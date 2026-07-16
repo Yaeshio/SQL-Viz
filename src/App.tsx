@@ -11,6 +11,7 @@ export default function App() {
     log,
     error,
     playing,
+    initializing,
     state,
     tableCount,
     rowCount,
@@ -32,6 +33,7 @@ export default function App() {
           onSqlChange={setSql}
           error={error}
           playing={playing}
+          initializing={initializing}
           onRun={run}
           log={log}
         />
