@@ -2,7 +2,7 @@ import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { DBState } from '../types';
 import { emptyState } from '../reducer';
-import { runPipeline } from '../runner';
+import { PgEngine } from '../pglite/engine';
 import { useAnimationPlayer } from './useAnimationPlayer';
 import type { AnimationHighlight } from './useAnimationPlayer';
 
@@ -25,6 +25,7 @@ export interface UseSqlRunnerResult {
   log: string[];
   error: string | null;
   playing: boolean;
+  initializing: boolean;
   state: DBState;
   tableCount: number;
   rowCount: number;
@@ -37,22 +38,38 @@ export interface UseSqlRunnerResult {
 }
 
 /** Owns SQL editor input, DBState, execution log/error/playing flags, and
- * drives the parse→apply→layout→diff→animate pipeline via runPipeline() +
- * useAnimationPlayer(). */
+ * drives the parse→execute(PGlite)→layout→diff→animate pipeline via
+ * PgEngine.run() + useAnimationPlayer(). PGlite (real PostgreSQL compiled to
+ * WASM) is the single source of truth for data/type behavior; DBState is only
+ * a snapshot derived from it for layout/diff/animation. */
 export function useSqlRunner(initialSql: string): UseSqlRunnerResult {
   const [sql, setSql] = useState(initialSql);
   const [state, dispatch] = useReducer(reducer, undefined, emptyState);
   const [log, setLog] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [initializing, setInitializing] = useState(false);
   const { appearingRows, filteringRows, highlight, playEvents, resetAnimation } = useAnimationPlayer();
   const canvasRef = useRef<HTMLDivElement>(null);
+  const engineRef = useRef<PgEngine>();
+  if (!engineRef.current) engineRef.current = new PgEngine();
 
   const pushLog = useCallback((line: string) => setLog((l) => [...l, line]), []);
 
   const run = useCallback(async () => {
     setError(null);
-    const { results, parseError } = runPipeline(sql, state, canvasRef.current?.clientWidth ?? 800);
+    const engine = engineRef.current!;
+
+    if (!engine.isReady()) {
+      setInitializing(true);
+      try {
+        await engine.ensureReady();
+      } finally {
+        setInitializing(false);
+      }
+    }
+
+    const { results, parseError } = await engine.run(sql, canvasRef.current?.clientWidth ?? 800);
     if (parseError) {
       setError(parseError);
       return;
@@ -77,9 +94,10 @@ export function useSqlRunner(initialSql: string): UseSqlRunnerResult {
       await playEvents(r.events);
     }
     setPlaying(false);
-  }, [sql, state, pushLog, playEvents, resetAnimation]);
+  }, [sql, pushLog, playEvents, resetAnimation]);
 
   const reset = useCallback(() => {
+    engineRef.current?.reset();
     dispatch({ type: 'reset' });
     setLog([]);
     setError(null);
@@ -95,6 +113,7 @@ export function useSqlRunner(initialSql: string): UseSqlRunnerResult {
     log,
     error,
     playing,
+    initializing,
     state,
     tableCount,
     rowCount,

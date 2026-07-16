@@ -79,8 +79,8 @@ describe('parseSql — INSERT', () => {
     expect(error).toBe('Unsupported clause: INSERT ... SELECT');
   });
 
-  it('ON DUPLICATE KEY UPDATE はエラーになる', () => {
-    const { statements, error } = parseSql("INSERT INTO a (id) VALUES (1) ON DUPLICATE KEY UPDATE id = 2");
+  it('ON CONFLICT ... DO UPDATE（upsert）はエラーになる', () => {
+    const { statements, error } = parseSql('INSERT INTO a (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET id = 2');
     expect(statements).toEqual([]);
     expect(error).toMatch(/^Unsupported clause: /);
   });

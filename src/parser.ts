@@ -40,8 +40,19 @@ export type Parsed = ParsedCreate | ParsedInsert | ParsedSelect;
  */
 class UnsupportedClauseError extends Error {}
 
+/**
+ * Under the PostgreSQL dialect, node-sql-parser represents several unset clauses
+ * (DISTINCT, LIMIT) as populated-but-empty objects (e.g. `{ type: null }`,
+ * `{ seperator: '', value: [] }`) rather than `null` as in the default dialect.
+ * Recurse into plain objects/strings so these still count as empty for gating,
+ * while an object with any genuinely populated field (e.g. an actual LIMIT
+ * value) still correctly counts as non-empty.
+ */
 function isEmpty(value: unknown): boolean {
-  return value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+  if (value === null || value === undefined || value === '') return true;
+  if (Array.isArray(value)) return value.every(isEmpty);
+  if (typeof value === 'object') return Object.values(value as Record<string, unknown>).every(isEmpty);
+  return false;
 }
 
 function assertNoExtraClauses(node: Record<string, unknown>, allowed: Set<string>): void {
@@ -49,6 +60,19 @@ function assertNoExtraClauses(node: Record<string, unknown>, allowed: Set<string
     if (allowed.has(key) || isEmpty(node[key])) continue;
     throw new UnsupportedClauseError(`Unsupported clause: ${key}`);
   }
+}
+
+/**
+ * Under the PostgreSQL dialect, node-sql-parser wraps identifier names (column_ref.column,
+ * an INSERT column list entry) in a nested `{ value: '...' }` or `{ expr: { value: '...' } }`
+ * shape instead of the flat string used elsewhere (e.g. the default dialect, or the `'*'`
+ * of `SELECT *`). Unwrap either shape down to the plain identifier string.
+ */
+function identName(node: unknown): string {
+  if (typeof node === 'string') return node;
+  const obj = node as { expr?: unknown; value?: unknown };
+  if (obj.expr !== undefined) return identName(obj.expr);
+  return String(obj.value ?? '');
 }
 
 function litValue(v: { type: string; value: unknown }): string | number | boolean | null {
@@ -65,7 +89,7 @@ const LITERAL_TYPES = new Set(['null', 'bool', 'boolean', 'number', 'single_quot
 function parseWhere(w: unknown): WhereClause | null {
   if (isEmpty(w)) return null;
   const node = w as { type?: string; operator?: string; left?: unknown; right?: unknown };
-  const left = node.left as { type?: string; column?: string } | undefined;
+  const left = node.left as { type?: string; column?: unknown } | undefined;
   const right = node.right as { type?: string; value?: unknown } | undefined;
   const isSupportedComparison =
     node.type === 'binary_expr' &&
@@ -79,7 +103,7 @@ function parseWhere(w: unknown): WhereClause | null {
     throw new UnsupportedClauseError('Unsupported clause: WHERE');
   }
   return {
-    column: left!.column!,
+    column: identName(left!.column),
     operator: node.operator!,
     value: litValue(right as { type: string; value: unknown }),
   };
@@ -92,7 +116,7 @@ const SELECT_ALLOWED_FIELDS = new Set(['type', 'columns', 'from', 'where', 'into
 export function parseSql(sql: string): { statements: Parsed[]; error?: string } {
   let ast: unknown;
   try {
-    ast = parser.parse(sql);
+    ast = parser.parse(sql, { database: 'PostgreSQL' });
   } catch (e) {
     return { statements: [], error: `Parse error: ${(e as Error).message}` };
   }
@@ -113,17 +137,18 @@ export function parseSql(sql: string): { statements: Parsed[]; error?: string } 
             throw new UnsupportedClauseError('Unsupported clause: CREATE TABLE');
           }
           const columns: Column[] = defs.map((d) => {
-            const def = d as { resource?: string; column?: { column: string }; definition?: { dataType: string } };
+            const def = d as { resource?: string; column?: { column: unknown }; definition?: { dataType: string } };
             if (def.resource !== 'column') {
               throw new UnsupportedClauseError(`Unsupported clause: ${def.resource ?? 'create_definition'}`);
             }
-            return { name: def.column!.column, type: normalizeType(def.definition!.dataType) };
+            return { name: identName(def.column!.column), type: normalizeType(def.definition!.dataType) };
           });
           out.push({ type: 'create', table, columns });
         } else if (node.type === 'insert') {
           assertNoExtraClauses(node, INSERT_ALLOWED_FIELDS);
           const table = (snode as { table?: { table?: string }[] }).table?.[0]?.table;
-          const cols = (snode as { columns?: string[] }).columns ?? null;
+          const colsRaw = (snode as { columns?: unknown[] }).columns ?? null;
+          const cols = colsRaw ? colsRaw.map((c) => identName(c)) : null;
           const valuesNode = (snode as { values?: { type?: string; values?: Array<{ value: { type: string; value: unknown }[] }> } }).values;
           if (valuesNode?.type !== 'values') {
             throw new UnsupportedClauseError('Unsupported clause: INSERT ... SELECT');
@@ -148,7 +173,7 @@ export function parseSql(sql: string): { statements: Parsed[]; error?: string } 
           if (!table) {
             throw new UnsupportedClauseError('Unsupported clause: FROM');
           }
-          const colsNode = (snode as { columns?: { expr: { type: string; column?: string } }[] }).columns ?? [];
+          const colsNode = (snode as { columns?: { expr: { type: string; column?: unknown } }[] }).columns ?? [];
           let colNames: string[];
           if (colsNode.length === 1 && colsNode[0].expr.type === 'star') {
             colNames = ['*'];
@@ -157,7 +182,7 @@ export function parseSql(sql: string): { statements: Parsed[]; error?: string } 
               if (c.expr.type !== 'column_ref' || !c.expr.column) {
                 throw new UnsupportedClauseError('Unsupported clause: SELECT column expression');
               }
-              return c.expr.column;
+              return identName(c.expr.column);
             });
           }
           const where = parseWhere((snode as { where?: unknown }).where);
