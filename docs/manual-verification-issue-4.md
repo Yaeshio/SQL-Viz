@@ -1,11 +1,18 @@
 # Issue #4 リファクタリング 手動動作確認ログ
 
+> **注記（Issue #14）**: 本ドキュメントは Issue #4（`App.tsx`/`Canvas.tsx` の
+> 責務分割リファクタリング）時点の、一度きりの手動検証記録である。現在も
+> 継続的に運用されているチェックリストではない。当時参照していたエラー
+> 文言はその後の Issue #8（PGlite導入）で実PostgreSQLのネイティブな文言に
+> 変わったため、以下は歴史的な記録としての正確性のために現在の文言へ
+> 更新してあるが、本ログ自体を再実施する運用は行っていない。
+
 [smoke-test-spec.md](./smoke-test-spec.md) の `SMOKE-*` シナリオに対応する SQL 文を、
 実際に開発サーバー（`npm run dev`）の SQL エディタに貼り付けて実行し、
 `App.tsx`/`Canvas.tsx` の責務分割リファクタリング（Issue #4）前後で挙動が
 変わっていないことを目視確認するためのチェックリスト。SQL 文・期待結果は
 [tests/smoke.test.ts](../tests/smoke.test.ts) の実装と一致させている
-（そちらは `runPipeline()` を直接呼ぶユニットテストで既に全件パス済み。
+（そちらは `PgEngine.run()` を直接呼ぶユニットテストで既に全件パス済み。
 本ログは同じシナリオを実際の画面・アニメーションで確認する）。
 
 ## 実行方法
@@ -105,7 +112,8 @@ INSERT INTO t (a, b, c, d, e) VALUES (NULL, NULL, NULL, NULL, NULL);
 INSERT INTO ghost (id) VALUES (1);
 ```
 
-期待結果: 赤枠のエラーバナーに `Table "ghost" does not exist` と表示される。
+期待結果: 赤枠のエラーバナーに `relation "ghost" does not exist` と表示される
+（実PostgreSQLのネイティブな文言。旧文言は `Table "ghost" does not exist`）。
 
 実施結果: [ ]
 
@@ -117,18 +125,24 @@ CREATE TABLE users (id INT);
 ```
 
 期待結果: 1文目は成功しテーブルが表示される。2文目でエラーバナーに
-`Table "users" already exists` と表示され、実行ログは1文目のみ追加される。
+`relation "users" already exists` と表示され、実行ログは1文目のみ追加される
+（旧文言は `Table "users" already exists`）。
 
 実施結果: [ ]
 
-### SMOKE-08: 列数不一致
+### SMOKE-08: VALUES の数がカラム数を超える INSERT
 
 ```sql
 CREATE TABLE users (id INT, name VARCHAR(50));
-INSERT INTO users VALUES (1);
+INSERT INTO users VALUES (1, 'Alice', 'extra');
 ```
 
-期待結果: エラーバナーに `Column count mismatch` と表示される。
+期待結果: エラーバナーに `INSERT has more expressions than target columns`
+と表示される（実PostgreSQLのネイティブな文言。旧シナリオは「`columns` と
+`VALUES` の数が不一致」で `Column count mismatch` を期待していたが、
+`VALUES` がカラム数より**少ない**場合は実PostgreSQLではエラーにならず
+残りのカラムが `NULL` 埋めされる挙動に変わっている。上記の SQL は
+`VALUES` がカラム数より**多い**、エラーになる方のケースを示す）。
 
 実施結果: [ ]
 
@@ -151,7 +165,8 @@ INSERT INTO users (id) VALUES (2);
 ```
 
 期待結果: `users`テーブルは作成されるが、2文目でエラーになり
-`Table "ghost" does not exist` が表示される。3文目（`users`への正しいINSERT）は
+`relation "ghost" does not exist` が表示される（旧文言は
+`Table "ghost" does not exist`）。3文目（`users`への正しいINSERT）は
 実行されず、`users`テーブルの行数は0のまま。
 
 実施結果: [ ]
