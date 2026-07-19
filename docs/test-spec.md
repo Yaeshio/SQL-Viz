@@ -29,28 +29,41 @@
 
 ## 2. テスト対象レイヤーの全体像
 
-SQL-Viz のパイプラインは以下のように構成されている（`App.tsx` の `run()` が駆動）。
+> **Issue #8（PGlite導入）以降の補足**: 以下は Issue #001 時点のパイプライン図
+> （②reducer層が純粋なJSロジックだった頃のもの）を、現在の実装に合わせて
+> 更新したものである。②の実行主体が `reducer.ts` の `apply*` 関数から
+> `PgEngine`（実PGliteに対する実行）に置き換わったのが最大の変更点。
+
+SQL-Viz のパイプラインは以下のように構成されている
+（`hooks/useSqlRunner.ts` の `run()` が `PgEngine.run()` を呼び出して駆動する。
+Issue #4 の UI 分割リファクタリング以前は `App.tsx` の `run()` が直接駆動していた）。
 
 ```
 SQL文字列
-  → parser.ts: parseSql()          … ① パーサー層
-  → reducer.ts: applyCreateTable() / applyInsert() / applySelect()
-                                    … ② reducer層
+  → parser.ts: parseSql()          … ① パーサー層（対応構文の事前検証・分類のみ）
+  → pglite/engine.ts: PgEngine.run()
+      （db.query()で実PGliteに対して実行 → snapshotAfter()でDBState再構築）
+                                    … ② engine層
   → layout.ts: layoutTables()      … ⑤ layout層
   → diff.ts: diffStates()          … ③ diff層
-  → App.tsx: playEvents()          … (対象外、UI駆動)
+  → hooks/useAnimationPlayer.ts: playEvents() … (対象外、UI駆動)
 ```
 
-`parser.ts` / `reducer.ts` / `diff.ts` / `layout.ts` はいずれも副作用のない純粋関数
-（または純粋関数の集合）であり、入力と出力を直接比較する形でユニットテストが可能である。
-ただし `layout.ts` の `layoutTables()` のみ、渡された `state` オブジェクトを直接変更して
-返す（`x`/`y` を書き換える）という点で `reducer.ts` の不変（immutable）な設計とは異なる。
+`parser.ts` / `diff.ts` / `layout.ts` はいずれも副作用のない純粋関数（または
+純粋関数の集合）であり、入力と出力を直接比較する形でユニットテストが可能である。
+一方 `pglite/engine.ts`（②engine層）は実際に PGlite（WASM PostgreSQL）へクエリを
+発行する非純粋な処理であり、ユニットテストというよりは実PGliteインスタンスを
+相手にしたインテグレーションテストに近い（4節を参照）。`layout.ts` の
+`layoutTables()` は渡された `state` オブジェクトを直接変更して返す
+（`x`/`y` を書き換える）という点で不変（immutable）な設計とは異なる。
 この違いはテスト実装上重要な注意点であり、5節および [test-design.md](./test-design.md)
 にて詳述する。
 
-なお `diff.ts` の `diffStates()` は `layout.ts` が計算する `x`/`y` を一切参照しないため、
-パイプライン上は reducer の直後に layout が挟まっているが、diff層・イベント生成層の
-テストでは layout層を経由させない（6節・7節を参照）。
+なお `diff.ts` の `diffStates()` は `layout.ts` が計算する `x`/`y` を一切参照しない。
+`PgEngine.run()` は本番の実行経路と同じく内部で必ず `layoutTables()` →
+`diffStates()` を呼ぶため、イベント生成層（7節）のテストも実際には layout層を
+経由する（固定の `canvasWidth` を使う。詳細は [test-design.md](./test-design.md)
+4.5節を参照）。
 
 ### 「④ イベント生成層」の位置づけ
 
@@ -89,46 +102,59 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
   返ること。`UPDATE`/`DELETE`/`JOIN` など非対応の文種を渡した場合に
   `error: "Unsupported statement type: ..."` が返ること。
 
-## 4. reducer層 (`reducer.ts`) の検証観点
+## 4. engine層 (`pglite/engine.ts`) の検証観点
 
-`applyCreateTable` / `applyInsert` / `applySelect` はいずれも `ApplyResult = { state, error? }`
-を返す純粋関数である。以下の観点を、対応 SQL 構文が増えるたびにケースを追加しやすい
-表形式で管理する。ケース ID は `REDUCER-<関数名>-<連番>` の命名規則を用いる
-（例: `REDUCER-CREATE-01`）。命名規則は [test-design.md](./test-design.md) の
-`it.each` 設計と 1:1 対応させる。
+> Issue #8（PGlite導入）以前は `reducer.ts` の `applyCreateTable` /
+> `applyInsert` / `applySelect`（いずれも `ApplyResult = { state, error? }`
+> を返す純粋関数）がこの節の検証対象だった。現在これらの関数は削除されて
+> おり、代わりに `PgEngine.run()` を実際の PGlite（WASM PostgreSQL）に
+> 対して呼び出し、返ってくる `StatementResult`（`state`/`error`/`events`）
+> を検証する。**旧実装は手書きJSロジックのため検証していなかった／
+> 黙って無視していた挙動が、実Postgresでは正式にエラーやNULL埋め等の
+> 挙動として現れるようになった点が最大の違い**（各項目に注記）。
 
-### `applyCreateTable`
+以下の観点を、対応 SQL 構文が増えるたびにケースを追加しやすい表形式で管理する。
+ケース ID は `ENGINE-<関数名>-<連番>` の命名規則を用いる（例: `ENGINE-CREATE-01`）。
+命名規則は [test-design.md](./test-design.md) の `it.each` 設計と 1:1 対応させる。
 
-| ケースID | 入力 | 期待結果 |
-|---|---|---|
-| REDUCER-CREATE-01 | 新規テーブル名・カラム定義 | `tables` に追加され `order` に push、`version` が +1、`lastSelect` が `null` にリセット |
-| REDUCER-CREATE-02 | 既存と同名のテーブル | `error: 'Table "..." already exists'`、`state` は変化しない |
-
-### `applyInsert`
-
-| ケースID | 入力 | 期待結果 |
-|---|---|---|
-| REDUCER-INSERT-01 | 存在するテーブルへの正常な INSERT | 行が末尾に追加、`version` が +1、`lastSelect` が `null` |
-| REDUCER-INSERT-02 | `columns` 省略（`null`） | テーブル定義のカラム順に値が割り当てられる |
-| REDUCER-INSERT-03 | 未知のカラム名を含む `columns` | 該当カラムの値は無視され、他のカラムは正しく設定される |
-| REDUCER-INSERT-04 | 存在しないテーブルへの INSERT | `error: 'Table "..." does not exist'` |
-| REDUCER-INSERT-05 | `columns` の数と `values` の数が不一致 | `error: 'Column count mismatch'` |
-
-### `applySelect`
+### CREATE TABLE
 
 | ケースID | 入力 | 期待結果 |
 |---|---|---|
-| REDUCER-SELECT-01 | `WHERE` なし（`SELECT *`） | 全行の `filteredOut` が `false` になる |
-| REDUCER-SELECT-02 | `WHERE col = value` | 一致しない行のみ `filteredOut: true` になる（行自体は削除されない） |
-| REDUCER-SELECT-03 | 各比較演算子（`=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`）| `compareValue` の仕様通りにフィルタされる |
-| REDUCER-SELECT-04 | 直前の SELECT でフィルタされた状態から `WHERE` なしで再実行 | フィルタがリセットされる（絞り込みが解除される） |
-| REDUCER-SELECT-05 | 存在しないテーブルへの SELECT | `error: 'Table "..." does not exist'` |
+| ENGINE-CREATE-01 | 新規テーブル名・カラム定義 | `tables` に追加され `order` に push、`version` が +1、`lastSelect` が `null` にリセット |
+| ENGINE-CREATE-02 | 既存と同名のテーブル | 実PostgreSQLのエラー（`relation "..." already exists`。旧実装の文言 `Table "..." already exists` から変更）、`state` は変化しない |
+
+### INSERT
+
+| ケースID | 入力 | 期待結果 |
+|---|---|---|
+| ENGINE-INSERT-01 | 存在するテーブルへの正常な INSERT | 行が末尾に追加、`version` が +1、`lastSelect` が `null` |
+| ENGINE-INSERT-02 | `columns` 省略（`null`） | テーブル定義のカラム順に値が割り当てられる |
+| ENGINE-INSERT-03 | 未知のカラム名を含む `columns` | 実PostgreSQLのエラーになる（**旧実装は黙って無視していた**） |
+| ENGINE-INSERT-04 | 存在しないテーブルへの INSERT | 実PostgreSQLのエラー（`relation "..." does not exist`。旧文言 `Table "..." does not exist` から変更） |
+| ENGINE-INSERT-05 | `columns` 省略時に `values` がカラム数より少ない | 残りのカラムは `NULL` で埋められる（**実PostgreSQLの正しい挙動。旧実装は `Column count mismatch` エラーだった**） |
+| ENGINE-INSERT-06 | `columns` 省略時に `values` がカラム数より多い | 実PostgreSQLのエラー（`INSERT has more expressions than target columns`） |
+| ENGINE-INSERT-07 | `DATE` カラムに日付以外の文字列を INSERT | 実PostgreSQLの型エラー（Issue #8導入の核心的な検証観点。**旧実装には型検証が無かった**） |
+| ENGINE-INSERT-08 | `INT` カラムに数値以外の文字列を INSERT | 実PostgreSQLの型エラー（同上、旧実装には無かった検証） |
+| ENGINE-INSERT-09 | `INT` カラムへの小数値 | 実PostgreSQLの丸め規則に従って丸められる |
+| ENGINE-INSERT-10 | 各データ型（`INT`/`VARCHAR`/`TEXT`/`BOOLEAN`/`DATE`）と `NULL` 値 | いずれも正しく保持される |
+
+### SELECT
+
+| ケースID | 入力 | 期待結果 |
+|---|---|---|
+| ENGINE-SELECT-01 | `WHERE` なし（`SELECT *`） | 全行の `filteredOut` が `false` になる |
+| ENGINE-SELECT-02 | `WHERE col = value` | 一致しない行のみ `filteredOut: true` になる（行自体は削除されない） |
+| ENGINE-SELECT-03 | 各比較演算子（`=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`）| 実PostgreSQLの `WHERE` 評価通りにフィルタされる |
+| ENGINE-SELECT-04 | 直前の SELECT でフィルタされた状態から `WHERE` なしで再実行 | フィルタがリセットされる（絞り込みが解除される） |
+| ENGINE-SELECT-05 | 存在しないテーブルへの SELECT | 実PostgreSQLのエラー（`relation "..." does not exist`） |
+| ENGINE-SELECT-06 | 存在しないカラム名を `WHERE`/`SELECT` に指定 | 実PostgreSQLのエラー（**旧実装では検証されず、`undefined` を返して黙って通過していた**） |
 
 ### 共通の検証観点
 
 | ケースID | 検証内容 |
 |---|---|
-| REDUCER-IMMUT-01 | `apply*` 呼び出し前後で元の `state` オブジェクト（テーブル・行を含む）が変更されていないこと（`cloneState` の不変性） |
+| ENGINE-IMMUT-01 | 過去に `run()` が返した `StatementResult.state`（テーブル・行を含む）が、後続の `run()` 呼び出しによって変更されていないこと（`PgEngine` 内部の `cloneState` によるスナップショットの独立性） |
 
 ## 5. layout層 (`layout.ts`) の検証観点
 
@@ -177,7 +203,7 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 | EVENT-04 | `INSERT` 後に `SELECT ... WHERE ...` | 条件に合わない行の `row_filter` と、`select_highlight` |
 | EVENT-05 | フィルタされた状態から `WHERE` なしで再度 `SELECT` | 該当行の `row_unfilter` と `select_highlight` |
 | EVENT-06 | `CREATE` → `INSERT` → `SELECT` の3文連続実行 | 文ごとに独立したイベント列が生成され、後続の文の結果が前の文の結果に累積されること |
-| EVENT-07 | 途中の文でエラーとなる SQL（例: 存在しないテーブルへの `INSERT`）を含む文の列 | エラーが発生した文以降は処理されない（`App.tsx` の `run()` の挙動に準じる） |
+| EVENT-07 | 途中の文でエラーとなる SQL（例: 存在しないテーブルへの `INSERT`）を含む文の列 | エラーが発生した文以降は処理されない（`hooks/useSqlRunner.ts` の `run()` の挙動に準じる） |
 
 ## 8. 現時点でサポートされている SQL 構文に基づく具体的テストケース一覧
 
