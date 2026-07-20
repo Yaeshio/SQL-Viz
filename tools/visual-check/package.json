@@ -1,0 +1,10 @@
+{
+  "name": "sql-viz-visual-check",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Agent-only visual verification tool (not a test suite). See README.md.",
+  "dependencies": {
+    "playwright": "1.61.1"
+  }
+}
