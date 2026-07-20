@@ -135,6 +135,18 @@ SQL の対応範囲を広げる場合（例：`UPDATE`、`JOIN`、複合 `WHERE`
 理由・再検討条件は [docs/routing-decision.md](docs/routing-decision.md)
 を参照。
 
+## エージェント目視確認用ツール（Playwright）
+
+`tools/visual-check/`（Issue #13）は、エージェントが `npm run dev` の画面を
+実際に操作してスクリーンショットで確認するための補助ツールであり、
+**テストスイートではない**（`npm test`・CIには組み込まれていない。E2Eテスト
+導入を見送った `docs/smoke-test-spec.md` 3節の決定と矛盾しない）。Chromium
+起動に必要なOS依存ライブラリの導入にroot権限が要る一方、本リポジトリの
+`.claude/settings.json` は `sudo` を恒久的に禁止しているため、公式Playwright
+Dockerイメージ上で実行することでホスト環境を汚染せずに動かす方式を採用して
+いる。使い方は [tools/visual-check/README.md](tools/visual-check/README.md)
+（もしくは `/visual-check` コマンド）を参照。
+
 ## CI/CD
 
 `main` 向け PR と `main` への push を対象に、GitHub Actions

@@ -26,3 +26,7 @@ dist-ssr
 
 # 動作確認用のデバッグスクリプト（/verify等で一時生成される）
 verify*.mjs
+
+# エージェント目視確認用ツール（tools/visual-check、Issue #13）の出力先
+tools/visual-check/out/
+tools/visual-check/node_modules/
