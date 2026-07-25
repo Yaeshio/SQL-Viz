@@ -96,11 +96,23 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
   カラム名配列になること。`WHERE` 句は単一の二項比較（`<col> <op> <value>`）のみ対応し、
   `AND`/`OR` を含む複合条件は非対応で `where` が `null` になる（エラーにはならず
   黙って無視される）という制約を検証する。
+- **ALTER TABLE**（Issue #18 M1）: 単一の `ADD COLUMN`/`DROP COLUMN` のみ許可。
+  複数アクション同時指定、`ALTER COLUMN ... TYPE`、`NOT NULL`等の制約付与、
+  `IF EXISTS`/`IF NOT EXISTS` はいずれも `Unsupported clause` になること。
+- **DROP TABLE**（Issue #18 M1）: 単一テーブル名のみ許可。複数テーブル指定、
+  `IF EXISTS` は `Unsupported clause` になること。
+- **UPDATE**（Issue #18 M1）: `SET` 句を `{column, value}[]` に分解すること
+  （`value` はリテラルのみ許可、列参照・演算式は `Unsupported clause`）。
+  `WHERE` は既存の単一比較のみ対応、省略時は `where: null`（全行対象）。
+  `FROM`/`RETURNING`/`WITH`（CTE）はいずれも `Unsupported clause` になること。
+- **DELETE**（Issue #18 M1）: テーブル名と `WHERE`（省略可、単一比較のみ）を
+  抽出すること。`RETURNING`/`USING` は `Unsupported clause` になること。
 - **複数文の一括パース**: セミコロン区切りで複数の文を渡した場合、`statements` に
   順序通り複数の `Parsed` が格納されること。
 - **エラー系**: SQL 構文として不正な文字列を渡した場合に `error: "Parse error: ..."` が
-  返ること。`UPDATE`/`DELETE`/`JOIN` など非対応の文種を渡した場合に
-  `error: "Unsupported statement type: ..."` が返ること。
+  返ること。`TRUNCATE`/`GRANT` など非対応の文種を渡した場合に
+  `error: "Unsupported statement type: ..."` が返ること（`UPDATE`/`DELETE`は
+  Issue #18 M1で対応済みのため、このエラー系の例からは除外した）。
 
 ## 4. engine層 (`pglite/engine.ts`) の検証観点
 
@@ -149,6 +161,40 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 | ENGINE-SELECT-04 | 直前の SELECT でフィルタされた状態から `WHERE` なしで再実行 | フィルタがリセットされる（絞り込みが解除される） |
 | ENGINE-SELECT-05 | 存在しないテーブルへの SELECT | 実PostgreSQLのエラー（`relation "..." does not exist`） |
 | ENGINE-SELECT-06 | 存在しないカラム名を `WHERE`/`SELECT` に指定 | 実PostgreSQLのエラー（**旧実装では検証されず、`undefined` を返して黙って通過していた**） |
+
+### ALTER TABLE（Issue #18 M1）
+
+| ケースID | 入力 | 期待結果 |
+|---|---|---|
+| ENGINE-ALTER-01 | 既存テーブルへの `ADD COLUMN` | `columns` に追加され、既存行の `values` に新キーが `NULL` で入る |
+| ENGINE-ALTER-02 | 既存テーブルへの `DROP COLUMN` | `columns` から削除され、既存行の `values` からも該当キーが削除される |
+| ENGINE-ALTER-03 | 既存カラムと同名の `ADD COLUMN` | 実PostgreSQLのエラー（`column "..." of relation "..." already exists`） |
+| ENGINE-ALTER-04 | 存在しないテーブルへの `ALTER TABLE` | 実PostgreSQLのエラー（`relation "..." does not exist`） |
+
+### DROP TABLE（Issue #18 M1）
+
+| ケースID | 入力 | 期待結果 |
+|---|---|---|
+| ENGINE-DROP-01 | 既存テーブルへの `DROP TABLE` | `tables`/`order` から削除され、`version` が +1 |
+| ENGINE-DROP-02 | 存在しないテーブルへの `DROP TABLE` | 実PostgreSQLのエラー（`table "..." does not exist`） |
+
+### UPDATE（Issue #18 M1）
+
+| ケースID | 入力 | 期待結果 |
+|---|---|---|
+| ENGINE-UPDATE-01 | `WHERE` に一致する行への `UPDATE` | 一致した行のみ値が更新され、行の `id`（安定ID）は変化しない |
+| ENGINE-UPDATE-02 | `WHERE`省略の `UPDATE` | 全行が更新される |
+| ENGINE-UPDATE-03 | 複数列を指定する `SET` | 指定した列すべてが更新される |
+| ENGINE-UPDATE-04 | 存在しないカラムへの `SET` | 実PostgreSQLのエラー（`column "..." of relation "..." does not exist`） |
+| ENGINE-UPDATE-05 | 型に合わない値への `UPDATE` | 実PostgreSQLの型エラー |
+
+### DELETE（Issue #18 M1）
+
+| ケースID | 入力 | 期待結果 |
+|---|---|---|
+| ENGINE-DELETE-01 | `WHERE` に一致する行への `DELETE` | 一致した行のみ `rows` から削除される |
+| ENGINE-DELETE-02 | `WHERE` 省略の `DELETE` | 全行が削除される |
+| ENGINE-DELETE-03 | 存在しないテーブルへの `DELETE` | 実PostgreSQLのエラー（`relation "..." does not exist`） |
 
 ### 共通の検証観点
 
@@ -220,8 +266,11 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 
 ## 9. 非スコープ・既知の制約
 
-- `UPDATE` / `DELETE` / `ALTER TABLE` は非対応（`parser.ts` が
-  `Unsupported statement type` エラーを返す）。
+- `UPDATE`（`SET` 右辺はリテラルのみ）/ `DELETE` / `ALTER TABLE`（単一の
+  `ADD COLUMN`/`DROP COLUMN` のみ）/ `DROP TABLE`（単一テーブルのみ）は
+  Issue #18 M1で対応済み（4節参照）。`ALTER TABLE` の `RENAME`・列の型変更・
+  複数アクションの同時指定、`UPDATE`/`DELETE` の複合 `WHERE`・`FROM`・
+  `USING`・`RETURNING`・`WITH`（CTE）は非対応のまま（`Unsupported clause`）。
 - `JOIN`・複合 `WHERE`（`AND`/`OR`/`LIKE`/`IN`/`BETWEEN`等）・`UNION`・`DISTINCT`・
   `HAVING`・`GROUP BY`/`ORDER BY`/`LIMIT`・`WITH`句(CTE)・`FROM`句のサブクエリ・
   集約関数/エイリアス付き列・`CREATE TABLE ... AS SELECT`・`CREATE TABLE IF NOT EXISTS`・

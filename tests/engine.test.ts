@@ -179,6 +179,145 @@ describe('PgEngine — SELECT', () => {
   });
 });
 
+describe('PgEngine — ALTER TABLE', () => {
+  it('ENGINE-ALTER-01: ADD COLUMN で columns に追加され、既存行に NULL 値が入る', async () => {
+    await engine.run('CREATE TABLE users (id INT)', CANVAS_W);
+    await engine.run('INSERT INTO users (id) VALUES (1)', CANVAS_W);
+    const { results } = await engine.run('ALTER TABLE users ADD COLUMN name VARCHAR(50)', CANVAS_W);
+    expect(results[0].error).toBeUndefined();
+    const next = results[0].state;
+    expect(next.tables.users.columns).toEqual([
+      { name: 'id', type: 'INT' },
+      { name: 'name', type: 'VARCHAR' },
+    ]);
+    expect(next.tables.users.rows[0].values).toEqual({ id: 1, name: null });
+    expect(next.version).toBe(3);
+    expect(next.lastSelect).toBeNull();
+  });
+
+  it('ENGINE-ALTER-02: DROP COLUMN で columns から削除され、既存行の values からもキーが消える', async () => {
+    await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W);
+    await engine.run("INSERT INTO users (id, name) VALUES (1, 'Alice')", CANVAS_W);
+    const { results } = await engine.run('ALTER TABLE users DROP COLUMN name', CANVAS_W);
+    expect(results[0].error).toBeUndefined();
+    const next = results[0].state;
+    expect(next.tables.users.columns).toEqual([{ name: 'id', type: 'INT' }]);
+    expect(next.tables.users.rows[0].values).toEqual({ id: 1 });
+  });
+
+  it('ENGINE-ALTER-03: 既存カラムと同名の ADD COLUMN は実PostgreSQLのエラーになる', async () => {
+    await engine.run('CREATE TABLE users (id INT)', CANVAS_W);
+    const { results } = await engine.run('ALTER TABLE users ADD COLUMN id INT', CANVAS_W);
+    expect(results[0].error).toBe('column "id" of relation "users" already exists');
+  });
+
+  it('ENGINE-ALTER-04: 存在しないテーブルへの ALTER TABLE は実PostgreSQLのエラーになる', async () => {
+    const { results } = await engine.run('ALTER TABLE ghost ADD COLUMN id INT', CANVAS_W);
+    expect(results[0].error).toBe('relation "ghost" does not exist');
+  });
+});
+
+describe('PgEngine — DROP TABLE', () => {
+  it('ENGINE-DROP-01: tables/order からテーブルが削除され version が +1 になる', async () => {
+    await engine.run('CREATE TABLE a (id INT)', CANVAS_W);
+    await engine.run('CREATE TABLE b (id INT)', CANVAS_W);
+    const { results } = await engine.run('DROP TABLE a', CANVAS_W);
+    expect(results[0].error).toBeUndefined();
+    const next = results[0].state;
+    expect(next.tables.a).toBeUndefined();
+    expect(next.order).toEqual(['b']);
+    expect(next.version).toBe(3);
+  });
+
+  it('ENGINE-DROP-02: 存在しないテーブルへの DROP TABLE は実PostgreSQLのエラーになる', async () => {
+    const { results } = await engine.run('DROP TABLE ghost', CANVAS_W);
+    expect(results[0].error).toBe('table "ghost" does not exist');
+  });
+});
+
+describe('PgEngine — UPDATE', () => {
+  async function seedUsers() {
+    await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W);
+    await engine.run(
+      "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')",
+      CANVAS_W,
+    );
+  }
+
+  it('ENGINE-UPDATE-01: WHERE に一致する行だけ値が更新され、行の id は変化しない', async () => {
+    await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W);
+    const seeded = await engine.run(
+      "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')",
+      CANVAS_W,
+    );
+    const bobId = seeded.results[0].state.tables.users.rows.find((r) => r.values.name === 'Bob')!.id;
+
+    const { results } = await engine.run("UPDATE users SET name = 'Bobby' WHERE id = 2", CANVAS_W);
+    expect(results[0].error).toBeUndefined();
+    const next = results[0].state;
+    expect(next.tables.users.rows).toHaveLength(3);
+    const updated = next.tables.users.rows.find((r) => r.id === bobId)!;
+    expect(updated.values).toEqual({ id: 2, name: 'Bobby' });
+    expect(next.version).toBe(3);
+  });
+
+  it('ENGINE-UPDATE-02: WHERE を省略すると全行が更新される', async () => {
+    await seedUsers();
+    const { results } = await engine.run("UPDATE users SET name = 'Same'", CANVAS_W);
+    expect(results[0].state.tables.users.rows.map((r) => r.values.name)).toEqual(['Same', 'Same', 'Same']);
+  });
+
+  it('ENGINE-UPDATE-03: SET に複数列を指定すると両方とも更新される', async () => {
+    await engine.run('CREATE TABLE t (a INT, b INT)', CANVAS_W);
+    await engine.run('INSERT INTO t (a, b) VALUES (1, 1)', CANVAS_W);
+    const { results } = await engine.run('UPDATE t SET a = 9, b = 9 WHERE a = 1', CANVAS_W);
+    expect(results[0].state.tables.t.rows[0].values).toEqual({ a: 9, b: 9 });
+  });
+
+  it('ENGINE-UPDATE-04: 存在しないカラムへの SET は実PostgreSQLのエラーになる', async () => {
+    await seedUsers();
+    const { results } = await engine.run("UPDATE users SET ghost = 'x' WHERE id = 1", CANVAS_W);
+    expect(results[0].error).toBe('column "ghost" of relation "users" does not exist');
+  });
+
+  it('ENGINE-UPDATE-05: 型に合わない値への UPDATE は実PostgreSQLの型エラーになる', async () => {
+    await seedUsers();
+    const { results } = await engine.run("UPDATE users SET id = 'abc' WHERE id = 1", CANVAS_W);
+    expect(results[0].error).toBe('invalid input syntax for type integer: "abc"');
+  });
+});
+
+describe('PgEngine — DELETE', () => {
+  async function seedUsers() {
+    await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W);
+    await engine.run(
+      "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')",
+      CANVAS_W,
+    );
+  }
+
+  it('ENGINE-DELETE-01: WHERE に一致する行だけが削除される', async () => {
+    await seedUsers();
+    const { results } = await engine.run('DELETE FROM users WHERE id = 2', CANVAS_W);
+    expect(results[0].error).toBeUndefined();
+    const next = results[0].state;
+    expect(next.tables.users.rows).toHaveLength(2);
+    expect(next.tables.users.rows.map((r) => r.values.name)).toEqual(['Alice', 'Carol']);
+    expect(next.version).toBe(3);
+  });
+
+  it('ENGINE-DELETE-02: WHERE を省略すると全行が削除される', async () => {
+    await seedUsers();
+    const { results } = await engine.run('DELETE FROM users', CANVAS_W);
+    expect(results[0].state.tables.users.rows).toEqual([]);
+  });
+
+  it('ENGINE-DELETE-03: 存在しないテーブルへの DELETE は実PostgreSQLのエラーになる', async () => {
+    const { results } = await engine.run('DELETE FROM ghost', CANVAS_W);
+    expect(results[0].error).toBe('relation "ghost" does not exist');
+  });
+});
+
 describe('PgEngine — 累積状態とスナップショットの独立性', () => {
   it('ENGINE-IMMUT-01: 過去に返した StatementResult.state は後続の run() で書き換わらない', async () => {
     await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W);

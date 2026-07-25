@@ -165,22 +165,71 @@ INSERT INTO users (id) VALUES (2);`;
   });
 });
 
-describe('C. 未実装SQL構文（明示的にエラーになることを検証する）', () => {
-  it('SMOKE-11: UPDATE文は "Unsupported statement type: update" エラーになる', async () => {
-    const { parseError } = await engine.run("UPDATE users SET name = 'x' WHERE id = 1", CANVAS_W);
-    expect(parseError).toBe('Unsupported statement type: update');
+describe('C. UPDATE/DELETE/ALTER TABLE（Issue #18 M1で対応。アニメーションイベントの検証はM2で追加）', () => {
+  it('SMOKE-11: UPDATE文は該当行のみ値が更新され、行の同一性が保たれる', async () => {
+    const sql = `CREATE TABLE users (id INT, name VARCHAR(50));
+INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
+UPDATE users SET name = 'Bobby' WHERE id = 2;`;
+    const { results, parseError } = await engine.run(sql, CANVAS_W);
+    expect(parseError).toBeUndefined();
+    expect(results.every((r) => !r.error)).toBe(true);
+
+    const beforeUpdate = results[1].state.tables.users.rows;
+    const bobId = beforeUpdate.find((r) => r.values.name === 'Bob')!.id;
+
+    const updateResult = results[2];
+    const updatedRow = updateResult.state.tables.users.rows.find((r) => r.id === bobId)!;
+    expect(updatedRow.values).toEqual({ id: 2, name: 'Bobby' });
+    expect(updateResult.state.tables.users.rows).toHaveLength(2);
   });
 
-  it('SMOKE-12: DELETE文は "Unsupported statement type: delete" エラーになる', async () => {
-    const { parseError } = await engine.run('DELETE FROM users WHERE id = 1', CANVAS_W);
-    expect(parseError).toBe('Unsupported statement type: delete');
+  it('SMOKE-12: DELETE文はWHEREに一致する行だけを削除する', async () => {
+    const sql = `CREATE TABLE users (id INT, name VARCHAR(50));
+INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
+DELETE FROM users WHERE id = 1;`;
+    const { results, parseError } = await engine.run(sql, CANVAS_W);
+    expect(parseError).toBeUndefined();
+    expect(results.every((r) => !r.error)).toBe(true);
+
+    const deleteResult = results[2];
+    expect(deleteResult.state.tables.users.rows).toHaveLength(1);
+    expect(deleteResult.state.tables.users.rows[0].values).toEqual({ id: 2, name: 'Bob' });
   });
 
-  it('SMOKE-13: ALTER TABLE文は "Unsupported statement type: alter" エラーになる', async () => {
-    const { parseError } = await engine.run('ALTER TABLE users ADD COLUMN age INT', CANVAS_W);
-    expect(parseError).toBe('Unsupported statement type: alter');
+  it('SMOKE-13: ALTER TABLEはADD COLUMN/DROP COLUMNをそれぞれ反映する', async () => {
+    const sql = `CREATE TABLE users (id INT);
+INSERT INTO users (id) VALUES (1);
+ALTER TABLE users ADD COLUMN name VARCHAR(50);
+ALTER TABLE users DROP COLUMN name;`;
+    const { results, parseError } = await engine.run(sql, CANVAS_W);
+    expect(parseError).toBeUndefined();
+    expect(results.every((r) => !r.error)).toBe(true);
+
+    const afterAdd = results[2];
+    expect(afterAdd.state.tables.users.columns).toEqual([
+      { name: 'id', type: 'INT' },
+      { name: 'name', type: 'VARCHAR' },
+    ]);
+
+    const afterDrop = results[3];
+    expect(afterDrop.state.tables.users.columns).toEqual([{ name: 'id', type: 'INT' }]);
   });
 
+  it('SMOKE-18: DROP TABLEはテーブルをキャンバスから取り除く', async () => {
+    const sql = `CREATE TABLE a (id INT);
+CREATE TABLE b (id INT);
+DROP TABLE a;`;
+    const { results, parseError } = await engine.run(sql, CANVAS_W);
+    expect(parseError).toBeUndefined();
+    expect(results.every((r) => !r.error)).toBe(true);
+
+    const final = results[results.length - 1];
+    expect(final.state.tables.a).toBeUndefined();
+    expect(final.state.order).toEqual(['b']);
+  });
+});
+
+describe('D. 未実装SQL構文（明示的にエラーになることを検証する）', () => {
   it('SMOKE-14: INNER JOINを含むSELECTは "Unsupported clause: JOIN" エラーになる', async () => {
     const { parseError } = await engine.run('SELECT * FROM a INNER JOIN b ON a.id = b.id', CANVAS_W);
     expect(parseError).toBe('Unsupported clause: JOIN');
@@ -202,7 +251,7 @@ describe('C. 未実装SQL構文（明示的にエラーになることを検証�
   });
 });
 
-describe('D. 複数回の実行(Run)をまたぐシナリオ', () => {
+describe('E. 複数回の実行(Run)をまたぐシナリオ', () => {
   it('SMOKE-17: CREATEのみのRunの後、別RunでINSERTのみを実行しても既存テーブルに行が追加される', async () => {
     const first = await engine.run('CREATE TABLE users (id INT, name VARCHAR(50));', CANVAS_W);
     expect(first.parseError).toBeUndefined();

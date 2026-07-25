@@ -92,11 +92,15 @@ UI 側のロジックが複雑化した場合は、この方針を再検討す�
 ## 4. 未実装 SQL 文の分類
 
 現時点でサポートされているのは `CREATE TABLE` / `INSERT` / 単純な `SELECT`
-（列指定・単一の `WHERE <col> <op> <value>` 比較のみ）である。それ以外の SQL 文・句が
-どう扱われるかを調査した結果、初期実装では**一様にエラーになるわけではない**ことが
-判明していた（`UPDATE`/`DELETE`等の非対応「文の種類」は `Unsupported statement type`
-エラーになる一方、`JOIN`・複合`WHERE`・`GROUP BY`等の非対応「句」は `SELECT` 文の
-内部処理がそれらを検査していなかったため、エラーにならず黙って不完全処理されていた）。
+（列指定・単一の `WHERE <col> <op> <value>` 比較のみ）に加え、Issue #18 M1で
+対応した `ALTER TABLE`（単一の `ADD COLUMN`/`DROP COLUMN` のみ）/ `DROP TABLE`
+（単一テーブルのみ）/ `UPDATE`（`SET` 右辺はリテラルのみ、`WHERE` は単一比較
+のみ）/ `DELETE`（`WHERE` は単一比較のみ、省略時は全行対象）である。それ以外の
+SQL 文・句が どう扱われるかを調査した結果、初期実装では**一様にエラーになる
+わけではない**ことが判明していた（`UPDATE`/`DELETE`等の非対応「文の種類」は
+`Unsupported statement type` エラーになる一方、`JOIN`・複合`WHERE`・
+`GROUP BY`等の非対応「句」は `SELECT` 文の内部処理がそれらを検査していな
+かったため、エラーにならず黙って不完全処理されていた）。
 
 この非対称性は [Issue #3](https://github.com/Yaeshio/SQL-Viz/issues/3) で解消済みである。
 `parser.ts` は、各文種（`create`/`insert`/`select`）についてサポートする AST の形
@@ -145,21 +149,31 @@ UI 側のロジックが複雑化した場合は、この方針を再検討す�
 | SMOKE-09 | SQL 構文として不正な文字列 | `Parse error: ...` エラーになること |
 | SMOKE-10 | 複数文の列（例: `CREATE` → `INSERT`（存在しないテーブル） → `SELECT`）の途中でエラーが発生するシナリオ | エラーが発生した文以降は実行されないこと（`PgEngine.run()` の早期終了挙動を `layoutTables`/`diffStates` 込みで検証） |
 
-### C. 未実装 SQL 構文（Issue #002 の核心要求）
+### C. `UPDATE`/`DELETE`/`ALTER TABLE`/`DROP TABLE`（Issue #18 M1で対応）
+
+Issue #18 M1により正常系として実装された。アニメーションイベント
+（`row_update`/`row_remove`/`column_add`/`column_drop`/`table_remove`）の
+検証は同Issue M2で追加する（本書はM2でこの節を更新する）。
+
+| ケースID | シナリオ | 検証内容 |
+|---|---|---|
+| SMOKE-11 | `UPDATE` 文（`WHERE` に一致する行のみ更新） | 一致した行のみ値が更新され、行の同一性（安定ID）が保たれること |
+| SMOKE-12 | `DELETE` 文（`WHERE` に一致する行のみ削除） | 一致した行のみ `rows` から削除され、他の行は残ること |
+| SMOKE-13 | `ALTER TABLE` 文（単一 `ADD COLUMN`/`DROP COLUMN`） | `columns` が更新され、既存行の `values` にも反映されること（`ADD COLUMN` は `NULL` 埋め、`DROP COLUMN` はキー削除） |
+| SMOKE-18 | `DROP TABLE` 文 | `tables`/`order` から該当テーブルが削除されること |
+
+### D. 未実装 SQL 構文（Issue #002 の核心要求）
 
 Issue #3 により、以下はすべて「明示的にエラーになること」を検証する統一パターンで
 実装する（旧 C-1/C-2 の区分は解消済み。詳細は4節を参照）。
 
 | ケースID | シナリオ | 検証内容 |
 |---|---|---|
-| SMOKE-11 | `UPDATE` 文 | `Unsupported statement type: update` エラーになること |
-| SMOKE-12 | `DELETE` 文 | `Unsupported statement type: delete` エラーになること |
-| SMOKE-13 | `ALTER TABLE` 文 | `Unsupported statement type: alter` エラーになること |
 | SMOKE-14 | `INNER JOIN` を含む `SELECT` | `Unsupported clause: JOIN` エラーになること |
 | SMOKE-15 | 複合 `WHERE`（`AND`/`OR`）を含む `SELECT` | `Unsupported clause: WHERE` エラーになること |
 | SMOKE-16 | `GROUP BY`/`ORDER BY`/`LIMIT`/`UNION` を含む `SELECT` | それぞれ `Unsupported clause: <該当フィールド名>` エラーになること |
 
-### D. 複数回の実行(Run)をまたぐシナリオ
+### E. 複数回の実行(Run)をまたぐシナリオ
 
 | ケースID | シナリオ | 検証内容 |
 |---|---|---|
