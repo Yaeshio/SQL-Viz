@@ -1,3 +1,4 @@
+import { AnimatePresence } from 'framer-motion';
 import type { DBState } from '../../types';
 import { computeCanvasViewBox } from '../../lib/canvasLayout';
 import TableNode from './TableNode';
@@ -9,11 +10,22 @@ interface Props {
   appearingRows: Set<string>;
   /** ids of rows that should currently fade out (filtered this tick) */
   filteringRows: Set<string>;
+  /** ids of rows whose values just changed (UPDATE) and should pulse */
+  updatingRows: Set<string>;
+  /** table+column keys (see columnKey()) that should currently animate in (ALTER ADD COLUMN this tick) */
+  appearingColumns: Set<string>;
   /** table currently highlighted by SELECT, plus its projected columns */
   highlight: CanvasHighlight | null;
 }
 
-export default function Canvas({ state, appearingRows, filteringRows, highlight }: Props) {
+export default function Canvas({
+  state,
+  appearingRows,
+  filteringRows,
+  updatingRows,
+  appearingColumns,
+  highlight,
+}: Props) {
   const tables = state.order.map((n) => state.tables[n]);
   const viewBox = computeCanvasViewBox(tables);
   return (
@@ -24,15 +36,19 @@ export default function Canvas({ state, appearingRows, filteringRows, highlight 
         </pattern>
       </defs>
       <rect width="100%" height="100%" fill="url(#grid)" />
-      {tables.map((t) => (
-        <TableNode
-          key={t.name}
-          table={t}
-          appearingRows={appearingRows}
-          filteringRows={filteringRows}
-          highlight={highlight}
-        />
-      ))}
+      <AnimatePresence>
+        {tables.map((t) => (
+          <TableNode
+            key={t.name}
+            table={t}
+            appearingRows={appearingRows}
+            filteringRows={filteringRows}
+            updatingRows={updatingRows}
+            appearingColumns={appearingColumns}
+            highlight={highlight}
+          />
+        ))}
+      </AnimatePresence>
     </svg>
   );
 }

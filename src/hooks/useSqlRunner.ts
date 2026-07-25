@@ -31,6 +31,8 @@ export interface UseSqlRunnerResult {
   rowCount: number;
   appearingRows: Set<string>;
   filteringRows: Set<string>;
+  updatingRows: Set<string>;
+  appearingColumns: Set<string>;
   highlight: AnimationHighlight | null;
   canvasRef: RefObject<HTMLDivElement>;
   run: () => Promise<void>;
@@ -49,7 +51,8 @@ export function useSqlRunner(initialSql: string): UseSqlRunnerResult {
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [initializing, setInitializing] = useState(false);
-  const { appearingRows, filteringRows, highlight, playEvents, resetAnimation } = useAnimationPlayer();
+  const { appearingRows, filteringRows, updatingRows, appearingColumns, highlight, playEvents, resetAnimation } =
+    useAnimationPlayer();
   const canvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<PgEngine>();
   if (!engineRef.current) engineRef.current = new PgEngine();
@@ -119,6 +122,8 @@ export function useSqlRunner(initialSql: string): UseSqlRunnerResult {
     rowCount,
     appearingRows,
     filteringRows,
+    updatingRows,
+    appearingColumns,
     highlight,
     canvasRef,
     run,

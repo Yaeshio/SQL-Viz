@@ -1,5 +1,5 @@
 import type { PGlite } from '@electric-sql/pglite';
-import type { AnimationEvent, DBState, Row } from '../types';
+import type { AnimationEvent, DBState, Row, WhereClause } from '../types';
 import { parseSql, type Parsed } from '../parser';
 import { diffStates } from '../diff';
 import { layoutTables } from '../layout';
@@ -38,6 +38,22 @@ function buildLabel(stmt: Parsed): string {
   }
   if (stmt.type === 'insert') {
     return `INSERT INTO ${stmt.table} (${stmt.rows.length} row${stmt.rows.length > 1 ? 's' : ''})`;
+  }
+  if (stmt.type === 'alter') {
+    return stmt.action === 'add'
+      ? `ALTER TABLE ${stmt.table} ADD COLUMN ${stmt.column.name}`
+      : `ALTER TABLE ${stmt.table} DROP COLUMN ${stmt.column}`;
+  }
+  if (stmt.type === 'drop') {
+    return `DROP TABLE ${stmt.table}`;
+  }
+  if (stmt.type === 'update') {
+    const w = stmt.where ? ` WHERE ${stmt.where.column} ${stmt.where.operator} ${String(stmt.where.value)}` : '';
+    return `UPDATE ${stmt.table} SET ${stmt.set.map((s) => s.column).join(', ')}${w}`;
+  }
+  if (stmt.type === 'delete') {
+    const w = stmt.where ? ` WHERE ${stmt.where.column} ${stmt.where.operator} ${String(stmt.where.value)}` : '';
+    return `DELETE FROM ${stmt.table}${w}`;
   }
   const w = stmt.where ? ` WHERE ${stmt.where.column} ${stmt.where.operator} ${String(stmt.where.value)}` : '';
   return `SELECT ${stmt.columns.join(', ')} FROM ${stmt.table}${w}`;
@@ -86,6 +102,24 @@ export class PgEngine {
     return `r${(this.rowSeq++).toString(36)}`;
   }
 
+  /**
+   * Resolves which stable row ids a WHERE clause matches, via the same
+   * ctid-lookup pattern used by SELECT. For UPDATE/DELETE this MUST be called
+   * before the raw statement executes: Postgres assigns an updated row a new
+   * physical ctid, so matching afterward would misidentify updated rows as
+   * newly-inserted ones instead of preserving their stable id. Returns null
+   * to mean "no WHERE clause, all rows match" (mirrors SELECT's matchedIds).
+   */
+  private async resolveMatchedIds(db: PGlite, table: string, where: WhereClause | null): Promise<Set<string> | null> {
+    if (!where) return null;
+    const ctidMap = this.ctidMaps.get(table) ?? new Map<string, string>();
+    const { rows } = await db.query<{ __ctid: string }>(
+      `SELECT ctid::text AS __ctid FROM ${quoteIdent(table)} WHERE ${quoteIdent(where.column)} ${where.operator} $1`,
+      [where.value],
+    );
+    return new Set(rows.map((r) => ctidMap.get(String(r.__ctid))).filter((id): id is string => !!id));
+  }
+
   async run(sql: string, canvasWidth: number): Promise<RunResult> {
     await this.ensureReady();
     const db = this.db!;
@@ -109,6 +143,16 @@ export class PgEngine {
     for (const { raw, stmt } of parsed) {
       const label = buildLabel(stmt);
 
+      let matchedIds: Set<string> | null = null;
+      if (stmt.type === 'update' || stmt.type === 'delete') {
+        try {
+          matchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
+        } catch (e) {
+          results.push({ label, state: current, events: [], error: formatPgError(e) });
+          break;
+        }
+      }
+
       try {
         await db.query(raw);
       } catch (e) {
@@ -116,7 +160,7 @@ export class PgEngine {
         break;
       }
 
-      const next = await this.snapshotAfter(stmt, current);
+      const next = await this.snapshotAfter(stmt, current, matchedIds);
       const laidOut = layoutTables(next, canvasWidth);
       const events = diffStates(current, laidOut);
       results.push({ label, state: laidOut, events });
@@ -127,7 +171,7 @@ export class PgEngine {
     return { results };
   }
 
-  private async snapshotAfter(stmt: Parsed, current: DBState): Promise<DBState> {
+  private async snapshotAfter(stmt: Parsed, current: DBState, matchedIds: Set<string> | null = null): Promise<DBState> {
     const db = this.db!;
 
     if (stmt.type === 'create') {
@@ -168,23 +212,83 @@ export class PgEngine {
       return next;
     }
 
+    if (stmt.type === 'drop') {
+      const next = cloneState(current);
+      delete next.tables[stmt.table];
+      next.order = next.order.filter((name) => name !== stmt.table);
+      this.ctidMaps.delete(stmt.table);
+      if (next.lastSelect?.table === stmt.table) next.lastSelect = null;
+      next.version++;
+      return next;
+    }
+
+    if (stmt.type === 'alter') {
+      const next = cloneState(current);
+      const table = next.tables[stmt.table];
+      if (stmt.action === 'add') {
+        const column = stmt.column;
+        next.tables[stmt.table] = {
+          ...table,
+          columns: [...table.columns, column],
+          rows: table.rows.map((r) => ({ ...r, values: { ...r.values, [column.name]: null } })),
+        };
+      } else {
+        const columnName = stmt.column;
+        next.tables[stmt.table] = {
+          ...table,
+          columns: table.columns.filter((c) => c.name !== columnName),
+          rows: table.rows.map((r) => {
+            const values = { ...r.values };
+            delete values[columnName];
+            return { ...r, values };
+          }),
+        };
+      }
+      next.lastSelect = null;
+      next.version++;
+      return next;
+    }
+
+    if (stmt.type === 'update') {
+      const table = current.tables[stmt.table];
+      const next = cloneState(current);
+      const setEntries = stmt.set.map((s) => [s.column, s.value] as const);
+      next.tables[stmt.table] = {
+        ...next.tables[stmt.table],
+        rows: table.rows.map((r) =>
+          matchedIds === null || matchedIds.has(r.id)
+            ? { ...r, values: { ...r.values, ...Object.fromEntries(setEntries) } }
+            : r,
+        ),
+      };
+      next.lastSelect = null;
+      next.version++;
+      return next;
+    }
+
+    if (stmt.type === 'delete') {
+      const next = cloneState(current);
+      const ctidMap = this.ctidMaps.get(stmt.table);
+      const rows = current.tables[stmt.table].rows.filter((r) => !(matchedIds === null || matchedIds.has(r.id)));
+      next.tables[stmt.table] = { ...next.tables[stmt.table], rows };
+      if (ctidMap) {
+        for (const [ctid, id] of ctidMap) {
+          if (matchedIds === null || matchedIds.has(id)) ctidMap.delete(ctid);
+        }
+      }
+      next.lastSelect = null;
+      next.version++;
+      return next;
+    }
+
     // select: no data mutation, only recompute filteredOut against existing rows
     const table = current.tables[stmt.table];
     const next = cloneState(current);
-    const ctidMap = this.ctidMaps.get(stmt.table) ?? new Map<string, string>();
-
-    let matchedIds: Set<string> | null = null;
-    if (stmt.where) {
-      const { rows } = await db.query<{ __ctid: string }>(
-        `SELECT ctid::text AS __ctid FROM ${quoteIdent(stmt.table)} WHERE ${quoteIdent(stmt.where.column)} ${stmt.where.operator} $1`,
-        [stmt.where.value],
-      );
-      matchedIds = new Set(rows.map((r) => ctidMap.get(String(r.__ctid))).filter((id): id is string => !!id));
-    }
+    const filterMatchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
 
     next.tables[stmt.table] = {
       ...next.tables[stmt.table],
-      rows: table.rows.map((r) => ({ ...r, filteredOut: matchedIds ? !matchedIds.has(r.id) : false })),
+      rows: table.rows.map((r) => ({ ...r, filteredOut: filterMatchedIds ? !filterMatchedIds.has(r.id) : false })),
     };
     next.lastSelect = { table: stmt.table, columns: stmt.columns, where: stmt.where };
     next.version++;

@@ -33,6 +33,61 @@ describe('diffStates', () => {
     ]);
   });
 
+  it('DIFF-TABLE-02: テーブルが order から消えると table_remove が発生する', () => {
+    const old = makeState(
+      [makeTable('a', [idCol], []), makeTable('b', [idCol], [])],
+      ['a', 'b'],
+    );
+    const next = makeState([makeTable('b', [idCol], [])], ['b']);
+    expect(diffStates(old, next)).toEqual([{ kind: 'table_remove', table: 'a' }]);
+  });
+
+  it('DIFF-COL-01: 既存テーブルにカラムが追加されると column_add が発生する', () => {
+    const old = makeState([makeTable('t', [idCol], [])]);
+    const next = makeState([makeTable('t', [idCol, makeColumn('age', 'INT')], [])]);
+    expect(diffStates(old, next)).toEqual([{ kind: 'column_add', table: 't', column: 'age' }]);
+  });
+
+  it('DIFF-COL-02: 既存テーブルからカラムが削除されると column_drop が発生する', () => {
+    const old = makeState([makeTable('t', [idCol, makeColumn('age', 'INT')], [])]);
+    const next = makeState([makeTable('t', [idCol], [])]);
+    expect(diffStates(old, next)).toEqual([{ kind: 'column_drop', table: 't', column: 'age' }]);
+  });
+
+  it('DIFF-COL-03: カラム追加で既存行がNULL埋めされても row_update は発生しない（ADD COLUMNの副作用と区別する）', () => {
+    const old = makeState([makeTable('t', [idCol], [makeRow('r0', { id: 1 })])]);
+    const next = makeState([
+      makeTable('t', [idCol, makeColumn('age', 'INT')], [makeRow('r0', { id: 1, age: null })]),
+    ]);
+    expect(diffStates(old, next)).toEqual([{ kind: 'column_add', table: 't', column: 'age' }]);
+  });
+
+  it('DIFF-COL-04: カラム削除で既存行からキーが消えても row_update は発生しない（DROP COLUMNの副作用と区別する）', () => {
+    const old = makeState([
+      makeTable('t', [idCol, makeColumn('age', 'INT')], [makeRow('r0', { id: 1, age: 30 })]),
+    ]);
+    const next = makeState([makeTable('t', [idCol], [makeRow('r0', { id: 1 })])]);
+    expect(diffStates(old, next)).toEqual([{ kind: 'column_drop', table: 't', column: 'age' }]);
+  });
+
+  it('DIFF-ROW-03: 既存の行が消えると row_remove が発生する', () => {
+    const old = makeState([
+      makeTable('t', [idCol], [makeRow('r0', { id: 1 }), makeRow('r1', { id: 2 })]),
+    ]);
+    const next = makeState([makeTable('t', [idCol], [makeRow('r0', { id: 1 })])]);
+    expect(diffStates(old, next)).toEqual([{ kind: 'row_remove', table: 't', rowId: 'r1' }]);
+  });
+
+  it('DIFF-ROW-04: 同じidの行の値が変わると row_update が発生する', () => {
+    const old = makeState([
+      makeTable('t', [idCol, makeColumn('name', 'VARCHAR')], [makeRow('r0', { id: 1, name: 'Alice' })]),
+    ]);
+    const next = makeState([
+      makeTable('t', [idCol, makeColumn('name', 'VARCHAR')], [makeRow('r0', { id: 1, name: 'Alicia' })]),
+    ]);
+    expect(diffStates(old, next)).toEqual([{ kind: 'row_update', table: 't', rowId: 'r0' }]);
+  });
+
   it('DIFF-FILTER-01: filteredOut が false→true になると row_filter が発生する', () => {
     const old = makeState([makeTable('users', [idCol], [makeRow('r0', { id: 1 }, false)])]);
     const next = makeState([makeTable('users', [idCol], [makeRow('r0', { id: 1 }, true)])]);
@@ -80,6 +135,41 @@ describe('diffStates', () => {
       { kind: 'row_filter', table: 'a', rowId: 'x' },
       { kind: 'row_add', table: 'b', rowId: 'z', index: 0 },
       { kind: 'select_highlight', table: 'a', columns: ['*'] },
+    ]);
+  });
+
+  it('DIFF-ORDER-02: table_appear/table_remove、及びテーブルごとのcolumn_add/column_drop/row_add/row_remove/row_updateの順序が保たれる', () => {
+    const old = makeState(
+      [
+        makeTable('a', [idCol, makeColumn('old_col', 'TEXT')], [
+          makeRow('x', { id: 1, old_col: 'foo' }),
+          makeRow('y', { id: 2, old_col: 'bar' }),
+        ]),
+        makeTable('b', [idCol], [makeRow('w', { id: 9 })]),
+        makeTable('d', [idCol, makeColumn('val', 'INT')], [makeRow('p', { id: 5, val: 10 })]),
+      ],
+      ['a', 'b', 'd'],
+    );
+    const next = makeState(
+      [
+        makeTable('a', [idCol, makeColumn('new_col', 'TEXT')], [
+          makeRow('x', { id: 1, new_col: null }),
+          makeRow('z', { id: 3, new_col: 'baz' }),
+        ]),
+        makeTable('c', [idCol], []),
+        makeTable('d', [idCol, makeColumn('val', 'INT')], [makeRow('p', { id: 5, val: 99 })]),
+      ],
+      ['a', 'c', 'd'],
+    );
+
+    expect(diffStates(old, next)).toEqual([
+      { kind: 'table_appear', table: 'c' },
+      { kind: 'table_remove', table: 'b' },
+      { kind: 'column_add', table: 'a', column: 'new_col' },
+      { kind: 'column_drop', table: 'a', column: 'old_col' },
+      { kind: 'row_add', table: 'a', rowId: 'z', index: 1 },
+      { kind: 'row_remove', table: 'a', rowId: 'y' },
+      { kind: 'row_update', table: 'd', rowId: 'p' },
     ]);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseSql } from '../src/parser';
-import type { ParsedCreate, ParsedInsert, ParsedSelect } from '../src/parser';
+import type { ParsedAlter, ParsedCreate, ParsedDelete, ParsedDrop, ParsedInsert, ParsedSelect, ParsedUpdate } from '../src/parser';
 
 describe('parseSql — CREATE TABLE', () => {
   it('テーブル名とカラム名・型を抽出する', () => {
@@ -158,6 +158,118 @@ describe('parseSql — SELECT', () => {
   });
 });
 
+describe('parseSql — ALTER TABLE', () => {
+  it('単一の ADD COLUMN を action/table/column に分解する', () => {
+    const { statements, error } = parseSql('ALTER TABLE users ADD COLUMN age INT');
+    expect(error).toBeUndefined();
+    const stmt = statements[0] as ParsedAlter;
+    expect(stmt).toEqual({ type: 'alter', action: 'add', table: 'users', column: { name: 'age', type: 'INT' } });
+  });
+
+  it('単一の DROP COLUMN を action/table/column に分解する', () => {
+    const { statements, error } = parseSql('ALTER TABLE users DROP COLUMN age');
+    expect(error).toBeUndefined();
+    const stmt = statements[0] as ParsedAlter;
+    expect(stmt).toEqual({ type: 'alter', action: 'drop', table: 'users', column: 'age' });
+  });
+
+  it.each([
+    ['複数アクションの同時指定', 'ALTER TABLE users ADD COLUMN a INT, ADD COLUMN b INT'],
+    ['ALTER COLUMN TYPE（型変更）', 'ALTER TABLE users ALTER COLUMN age TYPE TEXT'],
+    ['ADD COLUMN への NOT NULL 制約', 'ALTER TABLE users ADD COLUMN age INT NOT NULL'],
+    ['ADD COLUMN IF NOT EXISTS', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS age INT'],
+    ['DROP COLUMN IF EXISTS', 'ALTER TABLE users DROP COLUMN IF EXISTS age'],
+    ['ALTER TABLE IF EXISTS', 'ALTER TABLE IF EXISTS users ADD COLUMN age INT'],
+  ])('%s を含むALTER TABLEはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
+});
+
+describe('parseSql — DROP TABLE', () => {
+  it('テーブル名を抽出する', () => {
+    const { statements, error } = parseSql('DROP TABLE users');
+    expect(error).toBeUndefined();
+    const stmt = statements[0] as ParsedDrop;
+    expect(stmt).toEqual({ type: 'drop', table: 'users' });
+  });
+
+  it.each([
+    ['複数テーブル指定', 'DROP TABLE users, orders'],
+    ['IF EXISTS', 'DROP TABLE IF EXISTS users'],
+  ])('%s を含むDROP TABLEはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
+});
+
+describe('parseSql — UPDATE', () => {
+  it('SET句とWHERE句を column/operator/value に分解する', () => {
+    const { statements, error } = parseSql("UPDATE users SET name = 'Bob' WHERE id = 1");
+    expect(error).toBeUndefined();
+    const stmt = statements[0] as ParsedUpdate;
+    expect(stmt.type).toBe('update');
+    expect(stmt.table).toBe('users');
+    expect(stmt.set).toEqual([{ column: 'name', value: 'Bob' }]);
+    expect(stmt.where).toEqual({ column: 'id', operator: '=', value: 1 });
+  });
+
+  it('複数列のSETを配列として保持する', () => {
+    const { statements } = parseSql('UPDATE users SET name = 1, age = 2 WHERE id = 1');
+    const stmt = statements[0] as ParsedUpdate;
+    expect(stmt.set).toEqual([
+      { column: 'name', value: 1 },
+      { column: 'age', value: 2 },
+    ]);
+  });
+
+  it('WHEREを省略すると where が null になる（全行対象）', () => {
+    const { statements } = parseSql('UPDATE users SET name = 1');
+    const stmt = statements[0] as ParsedUpdate;
+    expect(stmt.where).toBeNull();
+  });
+
+  it.each([
+    ['SET右辺が式（列参照や演算を含む）', 'UPDATE users SET age = age + 1 WHERE id = 1'],
+    ['複合WHERE（AND/OR）', "UPDATE users SET name = 'x' WHERE id = 1 AND age > 2"],
+    ['FROM句', "UPDATE users SET name = 'x' FROM other WHERE users.id = other.id"],
+    ['RETURNING句', "UPDATE users SET name = 'x' WHERE id = 1 RETURNING *"],
+    ['WITH句（CTE）', "WITH x AS (SELECT 1) UPDATE users SET name = 'x'"],
+  ])('%s を含むUPDATEはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
+});
+
+describe('parseSql — DELETE', () => {
+  it('テーブル名とWHERE句を抽出する', () => {
+    const { statements, error } = parseSql('DELETE FROM users WHERE id = 1');
+    expect(error).toBeUndefined();
+    const stmt = statements[0] as ParsedDelete;
+    expect(stmt.type).toBe('delete');
+    expect(stmt.table).toBe('users');
+    expect(stmt.where).toEqual({ column: 'id', operator: '=', value: 1 });
+  });
+
+  it('WHEREを省略すると where が null になる（全行対象）', () => {
+    const { statements } = parseSql('DELETE FROM users');
+    const stmt = statements[0] as ParsedDelete;
+    expect(stmt.where).toBeNull();
+  });
+
+  it.each([
+    ['複合WHERE（AND/OR）', 'DELETE FROM users WHERE id = 1 AND age > 2'],
+    ['RETURNING句', 'DELETE FROM users WHERE id = 1 RETURNING *'],
+  ])('%s を含むDELETEはエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
+});
+
 describe('parseSql — 複数文の一括パース', () => {
   it('セミコロン区切りの複数文を順序通りに returns する', () => {
     const { statements, error } = parseSql(
@@ -175,7 +287,7 @@ describe('parseSql — エラー系', () => {
     expect(error).toMatch(/^Parse error: /);
   });
 
-  it.each(['UPDATE users SET id = 1 WHERE id = 2', 'DELETE FROM users WHERE id = 1'])(
+  it.each(['TRUNCATE TABLE users', 'GRANT SELECT ON users TO alice'])(
     '非対応の文種 (%s) は Unsupported statement type を返す',
     (sql) => {
       const { statements, error } = parseSql(sql);

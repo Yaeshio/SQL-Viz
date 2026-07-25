@@ -92,4 +92,47 @@ describe('イベント生成層（SQL → parser → PGlite実行 → diffStates
       ]),
     ).rejects.toThrow();
   });
+
+  it('EVENT-08: DROP TABLE を実行すると table_remove が発生する（Issue #18 M2）', async () => {
+    const results = await runSqlStatements(['CREATE TABLE a (id INT)', 'CREATE TABLE b (id INT)', 'DROP TABLE a']);
+    expect(results[2].events).toEqual([{ kind: 'table_remove', table: 'a' }]);
+  });
+
+  it('EVENT-09: ALTER TABLE ADD COLUMN を実行すると column_add のみ発生する（既存行への row_update は発生しない）', async () => {
+    const results = await runSqlStatements([
+      'CREATE TABLE users (id INT)',
+      'INSERT INTO users (id) VALUES (1)',
+      'ALTER TABLE users ADD COLUMN name VARCHAR(50)',
+    ]);
+    expect(results[2].events).toEqual([{ kind: 'column_add', table: 'users', column: 'name' }]);
+  });
+
+  it('EVENT-10: ALTER TABLE DROP COLUMN を実行すると column_drop のみ発生する', async () => {
+    const results = await runSqlStatements([
+      'CREATE TABLE users (id INT, name VARCHAR(50))',
+      "INSERT INTO users (id, name) VALUES (1, 'Alice')",
+      'ALTER TABLE users DROP COLUMN name',
+    ]);
+    expect(results[2].events).toEqual([{ kind: 'column_drop', table: 'users', column: 'name' }]);
+  });
+
+  it('EVENT-11: UPDATE を実行すると WHERE に一致した行のみ row_update が発生する', async () => {
+    const results = await runSqlStatements([
+      'CREATE TABLE users (id INT, name VARCHAR(50))',
+      "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')",
+      "UPDATE users SET name = 'Bobby' WHERE id = 2",
+    ]);
+    const bobId = results[1].state.tables.users.rows.find((r) => r.values.name === 'Bob')!.id;
+    expect(results[2].events).toEqual([{ kind: 'row_update', table: 'users', rowId: bobId }]);
+  });
+
+  it('EVENT-12: DELETE を実行すると WHERE に一致した行のみ row_remove が発生する', async () => {
+    const results = await runSqlStatements([
+      'CREATE TABLE users (id INT, name VARCHAR(50))',
+      "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')",
+      'DELETE FROM users WHERE id = 1',
+    ]);
+    const aliceId = results[1].state.tables.users.rows.find((r) => r.values.name === 'Alice')!.id;
+    expect(results[2].events).toEqual([{ kind: 'row_remove', table: 'users', rowId: aliceId }]);
+  });
 });

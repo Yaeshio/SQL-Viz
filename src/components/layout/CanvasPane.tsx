@@ -9,10 +9,21 @@ interface Props {
   state: DBState;
   appearingRows: Set<string>;
   filteringRows: Set<string>;
+  updatingRows: Set<string>;
+  appearingColumns: Set<string>;
   highlight: CanvasHighlight | null;
 }
 
-export default function CanvasPane({ canvasRef, tableCount, state, appearingRows, filteringRows, highlight }: Props) {
+export default function CanvasPane({
+  canvasRef,
+  tableCount,
+  state,
+  appearingRows,
+  filteringRows,
+  updatingRows,
+  appearingColumns,
+  highlight,
+}: Props) {
   return (
     <section className="flex-1 min-w-0 relative bg-slate-950">
       <div className="absolute top-3 left-4 z-10 text-[11px] uppercase tracking-wider text-slate-500 pointer-events-none">
@@ -28,6 +39,8 @@ export default function CanvasPane({ canvasRef, tableCount, state, appearingRows
             state={state}
             appearingRows={appearingRows}
             filteringRows={filteringRows}
+            updatingRows={updatingRows}
+            appearingColumns={appearingColumns}
             highlight={highlight}
           />
         )}

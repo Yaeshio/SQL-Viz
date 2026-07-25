@@ -43,7 +43,12 @@ export interface WhereClause {
 
 export type AnimationEvent =
   | { kind: 'table_appear'; table: string }
+  | { kind: 'table_remove'; table: string }
+  | { kind: 'column_add'; table: string; column: string }
+  | { kind: 'column_drop'; table: string; column: string }
   | { kind: 'row_add'; table: string; rowId: string; index: number }
+  | { kind: 'row_remove'; table: string; rowId: string }
+  | { kind: 'row_update'; table: string; rowId: string }
   | { kind: 'row_filter'; table: string; rowId: string }
   | { kind: 'row_unfilter'; table: string; rowId: string }
   | { kind: 'select_highlight'; table: string; columns: string[] };

@@ -17,6 +17,8 @@ export default function App() {
     rowCount,
     appearingRows,
     filteringRows,
+    updatingRows,
+    appearingColumns,
     highlight,
     canvasRef,
     run,
@@ -43,6 +45,8 @@ export default function App() {
           state={state}
           appearingRows={appearingRows}
           filteringRows={filteringRows}
+          updatingRows={updatingRows}
+          appearingColumns={appearingColumns}
           highlight={highlight}
         />
       </div>

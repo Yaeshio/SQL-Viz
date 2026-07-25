@@ -9,9 +9,10 @@ interface Props {
   y: number;
   appearing: boolean;
   filtering: boolean;
+  updating: boolean;
 }
 
-export default function TableRow({ table, row, y, appearing, filtering }: Props) {
+export default function TableRow({ table, row, y, appearing, filtering, updating }: Props) {
   const dimmed = row.filteredOut;
   return (
     <motion.g
@@ -20,12 +21,25 @@ export default function TableRow({ table, row, y, appearing, filtering }: Props)
         opacity: dimmed ? 0.18 : 1,
         x: 0,
         y,
-        scale: 1,
+        scale: updating ? [1, 1.05, 1] : 1,
       }}
       exit={{ opacity: 0, scale: 0.8 }}
-      transition={{ duration: filtering ? 0.6 : 0.35, ease: 'easeOut' }}
+      transition={{ duration: filtering ? 0.6 : updating ? 0.3 : 0.35, ease: 'easeOut' }}
     >
       <rect x={6} y={2} width={TABLE_W - 12} height={ROW_H - 4} rx={5} fill="#1e293b" />
+      {updating && (
+        <motion.rect
+          x={6}
+          y={2}
+          width={TABLE_W - 12}
+          height={ROW_H - 4}
+          rx={5}
+          fill="#38bdf8"
+          initial={{ opacity: 0.35 }}
+          animate={{ opacity: 0 }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+        />
+      )}
       {computeRowCells(table.columns, row).map((cell) => (
         <g key={cell.columnName}>
           {cell.dividerX !== null && (
