@@ -149,18 +149,18 @@ SQL 文・句が どう扱われるかを調査した結果、初期実装では
 | SMOKE-09 | SQL 構文として不正な文字列 | `Parse error: ...` エラーになること |
 | SMOKE-10 | 複数文の列（例: `CREATE` → `INSERT`（存在しないテーブル） → `SELECT`）の途中でエラーが発生するシナリオ | エラーが発生した文以降は実行されないこと（`PgEngine.run()` の早期終了挙動を `layoutTables`/`diffStates` 込みで検証） |
 
-### C. `UPDATE`/`DELETE`/`ALTER TABLE`/`DROP TABLE`（Issue #18 M1で対応）
+### C. `UPDATE`/`DELETE`/`ALTER TABLE`/`DROP TABLE`（Issue #18 M1/M2で対応）
 
-Issue #18 M1により正常系として実装された。アニメーションイベント
-（`row_update`/`row_remove`/`column_add`/`column_drop`/`table_remove`）の
-検証は同Issue M2で追加する（本書はM2でこの節を更新する）。
+Issue #18 M1により正常系として実装され、M2でアニメーションイベント
+（`row_update`/`row_remove`/`column_add`/`column_drop`/`table_remove`）が
+追加された。
 
 | ケースID | シナリオ | 検証内容 |
 |---|---|---|
-| SMOKE-11 | `UPDATE` 文（`WHERE` に一致する行のみ更新） | 一致した行のみ値が更新され、行の同一性（安定ID）が保たれること |
-| SMOKE-12 | `DELETE` 文（`WHERE` に一致する行のみ削除） | 一致した行のみ `rows` から削除され、他の行は残ること |
-| SMOKE-13 | `ALTER TABLE` 文（単一 `ADD COLUMN`/`DROP COLUMN`） | `columns` が更新され、既存行の `values` にも反映されること（`ADD COLUMN` は `NULL` 埋め、`DROP COLUMN` はキー削除） |
-| SMOKE-18 | `DROP TABLE` 文 | `tables`/`order` から該当テーブルが削除されること |
+| SMOKE-11 | `UPDATE` 文（`WHERE` に一致する行のみ更新） | 一致した行のみ値が更新され、行の同一性（安定ID）が保たれること。`row_update` が発生すること |
+| SMOKE-12 | `DELETE` 文（`WHERE` に一致する行のみ削除） | 一致した行のみ `rows` から削除され、他の行は残ること。`row_remove` が発生すること |
+| SMOKE-13 | `ALTER TABLE` 文（単一 `ADD COLUMN`/`DROP COLUMN`） | `columns` が更新され、既存行の `values` にも反映されること（`ADD COLUMN` は `NULL` 埋め、`DROP COLUMN` はキー削除）。それぞれ `column_add`/`column_drop` が発生し、既存行への `row_update` は発生しないこと |
+| SMOKE-18 | `DROP TABLE` 文 | `tables`/`order` から該当テーブルが削除されること。`table_remove` が発生すること |
 
 ### D. 未実装 SQL 構文（Issue #002 の核心要求）
 

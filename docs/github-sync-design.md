@@ -133,9 +133,26 @@ const MODE_ALLOWED_TYPES: Record<AppMode, Set<Parsed['type']>> = {
 テーブル削除検出（`old.order` にあり `next.order` にない名前）、
 カラム追加/削除検出（同名テーブルの `columns` の名前集合比較）、
 行削除検出（既存の行追加検出ロジックの逆——`old` にあり `next` にない
-行ID）、行更新検出（`old`/`next` 双方に存在するが `values` が異なる行。
-値の比較はキーごとの比較、または `JSON.stringify` 比較のいずれかで実装
-する）を追加する。
+行ID）、行更新検出（`old`/`next` 双方に存在するが `values` が異なる行）
+を追加する（実装時に確定した詳細は以下）。
+
+**確定した全体順序**（`tests/diff.test.ts` の `DIFF-ORDER-02` で固定）:
+`table_appear`群 → `table_remove`群 →（`next.order` の各テーブルについて）
+`column_add`群 → `column_drop`群 → `row_add`群 → `row_remove`群 →
+`row_update`群 → `row_filter`/`row_unfilter`群 → 最後に `select_highlight`。
+`table_remove` は対象テーブルが `next.tables` に存在しないため、既存の
+「`next.order` を主軸に回す」per-table ループでは検出できない。`old.order`
+を主軸にした別パスとして `table_appear` 検出の直後に追加する。
+
+**行更新検出の比較方法（確定）**: 単純な `values` 全体の等価比較
+（キーごと、または `JSON.stringify`）ではなく、**`old`/`next` 双方の
+`values` に共通して存在するキーのみ**を比較する。理由: `ALTER TABLE ADD
+COLUMN` は既存行の `values` に新キーを `NULL` で追加し、`DROP COLUMN` は
+逆にキーを削除する（4節参照）。この副作用を「値の変化」として
+`row_update` が誤検出すると、スキーマ変更のたびに無関係な行がパルス
+アニメーションしてしまう。共通キーのみを比較することで、`column_add`/
+`column_drop` の副作用と、`UPDATE` 文による本来の値変更を区別する
+（`tests/diff.test.ts` の `DIFF-COL-03`/`DIFF-COL-04` で固定）。
 
 `src/components/canvas/TableNode.tsx`/`TableRow.tsx` は、既存の
 `framer-motion`（`AnimatePresence`）による退場アニメーションを

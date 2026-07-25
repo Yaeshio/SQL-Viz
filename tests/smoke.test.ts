@@ -165,8 +165,8 @@ INSERT INTO users (id) VALUES (2);`;
   });
 });
 
-describe('C. UPDATE/DELETE/ALTER TABLE（Issue #18 M1で対応。アニメーションイベントの検証はM2で追加）', () => {
-  it('SMOKE-11: UPDATE文は該当行のみ値が更新され、行の同一性が保たれる', async () => {
+describe('C. UPDATE/DELETE/ALTER TABLE（Issue #18 M1で対応、アニメーションイベントはM2で対応）', () => {
+  it('SMOKE-11: UPDATE文は該当行のみ値が更新され、行の同一性が保たれ、row_updateが発生する', async () => {
     const sql = `CREATE TABLE users (id INT, name VARCHAR(50));
 INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 UPDATE users SET name = 'Bobby' WHERE id = 2;`;
@@ -181,9 +181,10 @@ UPDATE users SET name = 'Bobby' WHERE id = 2;`;
     const updatedRow = updateResult.state.tables.users.rows.find((r) => r.id === bobId)!;
     expect(updatedRow.values).toEqual({ id: 2, name: 'Bobby' });
     expect(updateResult.state.tables.users.rows).toHaveLength(2);
+    expect(updateResult.events).toEqual([{ kind: 'row_update', table: 'users', rowId: bobId }]);
   });
 
-  it('SMOKE-12: DELETE文はWHEREに一致する行だけを削除する', async () => {
+  it('SMOKE-12: DELETE文はWHEREに一致する行だけを削除し、row_removeが発生する', async () => {
     const sql = `CREATE TABLE users (id INT, name VARCHAR(50));
 INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 DELETE FROM users WHERE id = 1;`;
@@ -191,12 +192,14 @@ DELETE FROM users WHERE id = 1;`;
     expect(parseError).toBeUndefined();
     expect(results.every((r) => !r.error)).toBe(true);
 
+    const aliceId = results[1].state.tables.users.rows.find((r) => r.values.name === 'Alice')!.id;
     const deleteResult = results[2];
     expect(deleteResult.state.tables.users.rows).toHaveLength(1);
     expect(deleteResult.state.tables.users.rows[0].values).toEqual({ id: 2, name: 'Bob' });
+    expect(deleteResult.events).toEqual([{ kind: 'row_remove', table: 'users', rowId: aliceId }]);
   });
 
-  it('SMOKE-13: ALTER TABLEはADD COLUMN/DROP COLUMNをそれぞれ反映する', async () => {
+  it('SMOKE-13: ALTER TABLEはADD COLUMN/DROP COLUMNをそれぞれ反映し、column_add/column_dropが発生する', async () => {
     const sql = `CREATE TABLE users (id INT);
 INSERT INTO users (id) VALUES (1);
 ALTER TABLE users ADD COLUMN name VARCHAR(50);
@@ -210,12 +213,14 @@ ALTER TABLE users DROP COLUMN name;`;
       { name: 'id', type: 'INT' },
       { name: 'name', type: 'VARCHAR' },
     ]);
+    expect(afterAdd.events).toEqual([{ kind: 'column_add', table: 'users', column: 'name' }]);
 
     const afterDrop = results[3];
     expect(afterDrop.state.tables.users.columns).toEqual([{ name: 'id', type: 'INT' }]);
+    expect(afterDrop.events).toEqual([{ kind: 'column_drop', table: 'users', column: 'name' }]);
   });
 
-  it('SMOKE-18: DROP TABLEはテーブルをキャンバスから取り除く', async () => {
+  it('SMOKE-18: DROP TABLEはテーブルをキャンバスから取り除き、table_removeが発生する', async () => {
     const sql = `CREATE TABLE a (id INT);
 CREATE TABLE b (id INT);
 DROP TABLE a;`;
@@ -226,6 +231,7 @@ DROP TABLE a;`;
     const final = results[results.length - 1];
     expect(final.state.tables.a).toBeUndefined();
     expect(final.state.order).toEqual(['b']);
+    expect(final.events).toEqual([{ kind: 'table_remove', table: 'a' }]);
   });
 });
 

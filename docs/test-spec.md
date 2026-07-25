@@ -234,6 +234,14 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 | DIFF-SELECT-01 | `next.lastSelect` が設定されている | イベント列の末尾に `select_highlight` |
 | DIFF-NOOP-01 | old と next が同一内容 | 空のイベント配列 |
 | DIFF-ORDER-01 | 複数テーブルに対する変化が同時に起きる | `table_appear` 群 → 各テーブルの `row_add`/`row_filter`/`row_unfilter` 群 → `select_highlight` という全体順序が保たれること |
+| DIFF-TABLE-02（Issue #18 M2） | テーブルが `order` から消える | `table_remove` |
+| DIFF-COL-01（M2） | 既存テーブルにカラムが追加される | `column_add` |
+| DIFF-COL-02（M2） | 既存テーブルからカラムが削除される | `column_drop` |
+| DIFF-COL-03（M2） | カラム追加で既存行の `values` にNULL埋めのキーが増える | `column_add` のみ（`row_update` は発生しない。`ALTER TABLE ADD COLUMN` の副作用と本来の値変更を区別するため、`old`/`next` 双方に共通するキーのみで値を比較する） |
+| DIFF-COL-04（M2） | カラム削除で既存行の `values` からキーが消える | `column_drop` のみ（`row_update` は発生しない。理由は上記と同様） |
+| DIFF-ROW-03（M2） | 既存の行が消える | `row_remove` |
+| DIFF-ROW-04（M2） | 同じ `id` の行の値が変わる | `row_update` |
+| DIFF-ORDER-02（M2） | 複数テーブルにまたがり table_remove/column_add/column_drop/row_add/row_remove/row_update が同時に起きる | `table_appear` 群 → `table_remove` 群 →（各テーブルの）`column_add` 群 → `column_drop` 群 → `row_add` 群 → `row_remove` 群 → `row_update` 群 → `row_filter`/`row_unfilter` 群 → `select_highlight` という全体順序が保たれること |
 
 ## 7. イベント生成層（統合層）の検証観点
 
@@ -250,6 +258,11 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 | EVENT-05 | フィルタされた状態から `WHERE` なしで再度 `SELECT` | 該当行の `row_unfilter` と `select_highlight` |
 | EVENT-06 | `CREATE` → `INSERT` → `SELECT` の3文連続実行 | 文ごとに独立したイベント列が生成され、後続の文の結果が前の文の結果に累積されること |
 | EVENT-07 | 途中の文でエラーとなる SQL（例: 存在しないテーブルへの `INSERT`）を含む文の列 | エラーが発生した文以降は処理されない（`hooks/useSqlRunner.ts` の `run()` の挙動に準じる） |
+| EVENT-08（Issue #18 M2） | `DROP TABLE` | `table_remove` |
+| EVENT-09（M2） | `ALTER TABLE ADD COLUMN` | `column_add` のみ（既存行へのNULL埋めによる `row_update` は発生しない） |
+| EVENT-10（M2） | `ALTER TABLE DROP COLUMN` | `column_drop` のみ |
+| EVENT-11（M2） | `UPDATE ... WHERE ...` | `WHERE` に一致した行のみ `row_update` |
+| EVENT-12（M2） | `DELETE ... WHERE ...` | `WHERE` に一致した行のみ `row_remove` |
 
 ## 8. 現時点でサポートされている SQL 構文に基づく具体的テストケース一覧
 
