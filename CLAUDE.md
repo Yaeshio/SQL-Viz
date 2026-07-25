@@ -135,6 +135,11 @@ SQL の対応範囲を広げる場合（例：`UPDATE`、`JOIN`、複合 `WHERE`
 理由・再検討条件は [docs/routing-decision.md](docs/routing-decision.md)
 を参照。
 
+GitHub連携によるSQL実行履歴保持機能（設計モード/実験モードの切り替え、
+`schema/ddl.sql`/`query-examples.md` のプッシュ）は Issue #18 として
+計画中・未実装。仕様は [docs/github-sync-spec.md](docs/github-sync-spec.md)、
+実装方針は [docs/github-sync-design.md](docs/github-sync-design.md) を参照。
+
 ## エージェント目視確認用ツール（Playwright）
 
 `tools/visual-check/`（Issue #13）は、エージェントが `npm run dev` の画面を
