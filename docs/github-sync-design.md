@@ -22,31 +22,44 @@ snapshotAfter → layoutTables → diffStates → playEvents` を維持したま
    としてパイプラインの外側に追加する（アニメーション再生後に独立して
    発火する、既存の実行フローには影響しない）。
 
-## 2. モード管理の実装方針
+## 2. モード管理の実装方針（M3で確定・実装済み）
 
-- `src/hooks/useAppMode.ts`（新規）— `export type AppMode = 'design' | 'experiment'`
-  を持つ単純な `useState` ラッパー。`{ mode, setMode }` を返す。
+- `AppMode` 型は `src/types.ts` に置く（`export type AppMode = 'design' | 'experiment'`）。
+  CLAUDE.mdが明記する「`types.ts` が唯一の情報源」という既存方針に揃えるため、
+  当初案にあった `useAppMode.ts` 側での定義はやめ、`useAppMode.ts` は
+  `types.ts` からの re-export と単純な `useState` ラッパー（`{ mode, setMode }`
+  を返す）のみを担う。
 - **単一のPGliteセッションを両モードで共有する**（`PgEngine` インスタンスを
-  モードごとに分けない）。構造的安全性は M3 で追加するモードゲート
-  （文種の許可リストチェック）のみで担保する。
+  モードごとに分けない）。構造的安全性は M3 で追加したモードゲート
+  （文種の許可リストチェック、`src/pglite/engine.ts` の `MODE_ALLOWED_TYPES`）
+  で担保する。
   - 却下した代替案: モードごとに独立した/フォーク可能なPGliteセッションを
     持たせる案。実験モードの `INSERT`/`UPDATE`/`DELETE` を隔離すれば
     「設計モード復帰時のリセット」（3節）が自然に実現できる利点はあるが、
     PGliteインスタンスの複製・切り替えコストと実装複雑度が高く、
     「実験モードで許可される文種を絞る」という単純なゲートだけで
     構造安全性の要件（github-sync-spec.md 2節）は満たせるため、MVPでは
-    見送る。
-- **モード遷移時のデータリセット**（実験モード→設計モード復帰時）:
-  `PgEngine` に、設計モードへ最後に遷移した時点（＝直近の設計モード操作
-  完了時点）のスナップショットを保持させ、実験モードから設計モードへ
-  戻る際にそのスナップショットへ復元する処理を追加する。具体的には
-  `PgEngine` に `snapshotDesignState(): void` / `restoreDesignState(): Promise<DBState>`
-  相当のメソッドを追加し、`useAppMode` の `setMode` が `'experiment' → 'design'`
-  遷移を検出した際に `restoreDesignState()` を呼ぶ形を想定する（PGlite
-  自体への行レベルのロールバックではなく、既存の `cloneState`
-  （`src/reducer.ts`）パターンを踏襲したアプリ側スナップショット＋
-  再実行、または該当テーブルの行を再INSERTし直す方式のどちらが妥当かは
-  実装時に精査する）。
+    見送った。
+- **モード遷移時のデータリセット（確定・実装済み）**: Postgresトランザクション
+  （`BEGIN`/`ROLLBACK`）で実現する。設計モード→実験モード遷移後、最初に
+  実行された実験モードの文で `PgEngine.run()` が遅延的に `BEGIN` を発行し
+  （モード切替そのものではなく最初の実行タイミングに紐付けることで、一度も
+  実行せずにモードだけ切り替えても何もしない）、以降の実験モード中の全文
+  （複数回のRunクリックにまたがる）を同一の未コミットトランザクション内で
+  実行する。実験モード→設計モード復帰時は `PgEngine.returnToDesign()` が
+  `ROLLBACK` 一発で実験モード中のデータ変更をまとめて取り消す。
+  - 却下した代替案: アプリ側でDBStateをスナップショットし、復帰時に対象
+    テーブルの行を手動でDELETE→再INSERTして再現する方式。PGlite（本物の
+    Postgres）のMVCC/トランザクション機構にそのまま乗るトランザクション方式
+    のほうが実装量が少なく、巻き戻し漏れが原理的に起きないため採用しなかった。
+  - `ROLLBACK` はDB側の物理行を戻すだけなので、アプリ側の `ctidMap`/
+    `lastState`/`rowSeq`（`PgEngine` のブックキーピング）は実験モードに
+    入る直前にスナップショットしておき、`ROLLBACK` と同時に復元する
+    （`DesignCheckpoint` 型、`PgEngine.returnToDesign()`）。
+  - 副次的な帰結: 行データは実験モードでしか作れず、設計モードに戻るたびに
+    必ずロールバックされるため、行データがモード遷移をまたいで「正準化」
+    される経路はM3のスコアには存在しない（`schema/ddl.sql`が構造のみを対象と
+    する4節の設計と整合する）。
 
 ## 3. `parser.ts` 拡張方針
 

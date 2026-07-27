@@ -34,7 +34,8 @@ SQLパイプラインの純粋ロジック層（`types.ts`/`parser.ts`/`reducer.
 意図的な例外で、PGlite 実行エンジン関連のコードをひとまとめにしている。
 UI層は責務ごとに以下へ分割されている（Issue #4 のリファクタリングによる）：
 
-- `src/hooks/` — 状態管理・副作用（`useSqlRunner`, `useAnimationPlayer`）
+- `src/hooks/` — 状態管理・副作用（`useSqlRunner`, `useAnimationPlayer`,
+  `useAppMode`）
 - `src/components/` — プレゼンテーション（JSX/Tailwind）。`layout/`（画面
   全体のレイアウト部品）、`sql-editor/`（SQLエディタペイン）、`canvas/`
   （キャンバス描画）に領域ごとのサブフォルダを持つ
@@ -49,28 +50,43 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
 `Table`（name、`Column[]`、`Row[]`、グリッド上の `x`/`y`）、`DBState`
 （`tables` レコード、レイアウト/反復順を保持する `order` 配列、
 `lastSelect`、`version` カウンタ）、`AnimationEvent`（`table_appear`,
-`row_add`, `row_filter`, `row_unfilter`, `select_highlight`）。
+`table_remove`, `column_add`, `column_drop`, `row_add`, `row_remove`,
+`row_update`, `row_filter`, `row_unfilter`, `select_highlight`）、
+`AppMode`（`'design' | 'experiment'`。Issue #18 M3、次段落参照）。
 
-**文分割 → 事前検証 → 実行(PGlite) → スナップショット再構築 → レイアウト →
-差分 → アニメーション のパイプライン**（`hooks/useSqlRunner.ts` の `run()`
-が `pglite/engine.ts` の `PgEngine.run()` を呼び出して駆動し、SQL 文ごとに
-1回、順番に実行される）：
+**文分割 → 事前検証 → モードゲート → 実行(PGlite) → スナップショット再構築 →
+レイアウト → 差分 → アニメーション のパイプライン**（`hooks/useSqlRunner.ts`
+の `run()` が `pglite/engine.ts` の `PgEngine.run()` を呼び出して駆動し、SQL
+文ごとに1回、順番に実行される）：
 1. `pglite/splitStatements.ts` — `splitStatements()` がクォート／コメント
    を考慮しつつ、セミコロン区切りの生 SQL 文字列を1文ずつに分割する。
 2. `parser.ts` — `parseSql()` が `node-sql-parser` で AST を生成し、
-   `ParsedCreate` / `ParsedInsert` / `ParsedSelect` のいずれかに絞り込む
-   「事前検証ゲート」。それ以外の文種はすべてパースエラー
-   （`Unsupported statement type`）になる。`SELECT` は単一の
-   `WHERE <col> <op> <value>` 比較のみ対応（`AND`/`OR`、`JOIN`、
-   `UPDATE`/`DELETE` は非対応）。**ゲートを通過した文を実際に実行する
-   のは PGlite であり、`parser.ts` 自身は `DBState` を生成しない。**
-3. `PgEngine.run()`（`pglite/engine.ts`）— ゲートを通過した生の SQL 文字列
+   `ParsedCreate` / `ParsedInsert` / `ParsedSelect` / `ParsedAlter`
+   （`ADD COLUMN`/`DROP COLUMN` の単一アクションのみ）/ `ParsedDrop` /
+   `ParsedUpdate` / `ParsedDelete` のいずれかに絞り込む「事前検証ゲート」。
+   それ以外の文種・構文はすべてパースエラー（`Unsupported statement type`
+   / `Unsupported clause`）になる。`SELECT`/`UPDATE`/`DELETE` の `WHERE` は
+   単一の `<col> <op> <value>` 比較のみ対応（`AND`/`OR`、`JOIN` は非対応）。
+   **ゲートを通過した文を実際に実行するのは PGlite であり、`parser.ts`
+   自身は `DBState` を生成しない。**
+3. `pglite/engine.ts` の `MODE_ALLOWED_TYPES` によるモードゲート（Issue #18
+   M3）— `parser.ts` の構文ゲートとは独立した別レイヤーで、`design`
+   モードでは `create`/`alter`/`drop`、`experiment` モードでは
+   `select`/`insert`/`update`/`delete` のみを許可する。パース済みの全文が
+   対象で、1文でも現在のモードで許可されていなければ、どの文も実行せず
+   `parseError` を返す（構文エラー時と同じ all-or-nothing の挙動）。
+4. `PgEngine.run()`（`pglite/engine.ts`）— ゲートを通過した生の SQL 文字列
    を `db.query()` でそのままブラウザ内の PGlite（実 PostgreSQL/WASM）に
    対して実行する。型不一致・制約違反・`WHERE` 評価は本物の Postgres の
    挙動そのものであり、失敗時は Postgres のネイティブなエラー文言
    （例: `relation "ghost" does not exist`）がそのまま UI に出る。
-4. `PgEngine.snapshotAfter()`（同ファイル）— PGlite へクエリし直して
-   `DBState` を再構築する。旧 `reducer.ts` の `applyCreateTable` /
+   `experiment` モードの最初の文実行時に `BEGIN` を遅延発行し、以降の
+   `experiment` モード中の全文（複数回のRunをまたいでも）を同一の
+   未コミットトランザクションに乗せる。
+5. `PgEngine.snapshotAfter()`（同ファイル）— PGlite へクエリし直して
+   `DBState` を再構築する。`create`/`insert`/`select` に加え、`alter`
+   （`ADD COLUMN`/`DROP COLUMN`）・`drop`・`update`・`delete` の分岐も
+   持つ（Issue #18 M1）。旧 `reducer.ts` の `applyCreateTable` /
    `applyInsert` / `applySelect` はこの一部として置き換えられ、
    `reducer.ts` 自体は `emptyState` / `cloneState` / `normalizeType`
    というヘルパー関数のみが残っている（`cloneState` は変更前にテーブル/
@@ -82,28 +98,45 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    `filteredOut` フラグを反転させるだけ——これにより、キャンバス側で
    行を「即座に消す」のではなく「フェードアウトさせる」アニメーションが
    可能になっている（この設計意図自体は PGlite 導入前後で変わっていない）。
-5. `layout.ts` — `layoutTables()` が、キャンバスの現在のピクセル幅を
+6. `PgEngine.returnToDesign()`（同ファイル、Issue #18 M3）— `experiment`
+   モードから `design` モードへ復帰する際に呼ばれ、`ROLLBACK` で
+   `experiment` モード中の `INSERT`/`UPDATE`/`DELETE` をまとめて取り消す
+   （テーブル構造自体は `design` モードでしか変更できないため影響しない）。
+   `ROLLBACK` はDB側の物理行のみを戻すため、`ctidMap`/`lastState`/
+   `rowSeq` は `experiment` モードに入る直前にアプリ側でスナップショット
+   （`DesignCheckpoint`）しておき、ここで一緒に復元する。行データは
+   `experiment` モードでしか作れずモード復帰のたびに必ずロールバックされる
+   ため、行データがモード遷移をまたいで永続化される経路はスコープ上
+   存在しない（永続化されるのはテーブル構造のみ）。
+7. `layout.ts` — `layoutTables()` が、キャンバスの現在のピクセル幅を
    基準に各テーブルへグリッド状の `x`/`y` を割り当てる（収まらなければ
    次の行に折り返す）。PGlite 導入による変更なし。
-6. `diff.ts` — `diffStates(old, next)` が変更前後の `DBState` を比較し、
-   順序付きの `AnimationEvent[]` を生成する（新規テーブル → 新規行 →
-   フィルタ/解除の変化 → SELECT ハイライトの順）。アニメーションを
-   駆動しているのはこの差分であり、状態遷移自体は即時かつ純粋である。
-   PGlite 導入による変更なし。
-7. `hooks/useSqlRunner.ts` の `run()` が文ごとに
+8. `diff.ts` — `diffStates(old, next)` が変更前後の `DBState` を比較し、
+   順序付きの `AnimationEvent[]` を生成する（新規テーブル → 削除テーブル
+   → カラム追加/削除 → 新規行 → 削除行 → 値更新 → フィルタ/解除の変化 →
+   SELECT ハイライトの順）。アニメーションを駆動しているのはこの差分で
+   あり、状態遷移自体は即時かつ純粋である。
+9. `hooks/useSqlRunner.ts` の `run()` が文ごとに
    `hooks/useAnimationPlayer.ts` の `playEvents()` を呼び出す。
    `playEvents()` はこのイベント列を順に処理し、`appearingRows` /
-   `filteringRows` / `highlight` という React の state を更新しながら
-   `await delay(ms)` を挟んでアニメーションのタイムラインを構築し、
-   完了後に次の文へ進む。PGlite 導入による変更なし。ただし
-   `useSqlRunner.ts` は `PgEngine` のインスタンスを `useRef` で1つだけ
-   保持し続けるようになり、初回実行時は `engine.ensureReady()`
-   （`import('@electric-sql/pglite')` による遅延ロード → `new PGlite()`
-   → `await db.waitReady`）を待つ間 `initializing` state が `true` になる
-   （Run ボタン無効化・「エンジン読込中…」表示、
-   `components/sql-editor/SqlEditorPane.tsx`）。`engine.reset()` は
-   PGlite インスタンスを破棄するため、次回実行時に再度コールドスタート
-   が発生する。
+   `filteringRows` / `updatingRows` / `appearingColumns` / `highlight` と
+   いう React の state を更新しながら `await delay(ms)` を挟んで
+   アニメーションのタイムラインを構築し、完了後に次の文へ進む
+   （`table_remove`/`row_remove`/`column_drop` は `framer-motion` の
+   `AnimatePresence` によるアンマウント時の退場アニメーションに任せる
+   ため、専用のstateを持たない）。`useSqlRunner.ts` は `PgEngine` の
+   インスタンスを `useRef` で1つだけ保持し続け、初回実行時は
+   `engine.ensureReady()`（`import('@electric-sql/pglite')` による遅延
+   ロード → `new PGlite()` → `await db.waitReady`）を待つ間
+   `initializing` state が `true` になる（Run ボタン無効化・
+   「エンジン読込中…」表示、`components/sql-editor/SqlEditorPane.tsx`）。
+   `engine.reset()` は PGlite インスタンスを破棄するため、次回実行時に
+   再度コールドスタートが発生する。`useSqlRunner(initialSql, mode)` は
+   `mode: AppMode`（`hooks/useAppMode.ts`、`App.tsx` が所有）を引数に取り、
+   毎回の `PgEngine.run()` 呼び出しに転送する。`experiment → design` への
+   遷移を検出する内部 `useEffect` が `PgEngine.returnToDesign()` を呼び、
+   その差分を通常のアニメーションとして再生する（`modeTransitioning`
+   stateがこの間 `true` になり、Run ボタンと `ModeToggle` を無効化する）。
 
 **描画** — `components/canvas/Canvas.tsx` は各テーブルを
 `components/canvas/TableNode.tsx` として、`framer-motion`
@@ -116,11 +149,11 @@ props に応じてアニメーションする。テーブルカード内部の�
 `layout.ts` は引き続きテーブル**同士**のグリッド配置（`TABLE_W`,
 `HEADER_H`, `ROW_H`, `COL_GAP` 等の定数を含む）専用。
 
-SQL の対応範囲を広げる場合（例：`UPDATE`、`JOIN`、複合 `WHERE` など）、
-通常は `parser.ts`（許可リストの拡張）、`pglite/engine.ts`
-（`snapshotAfter()` の文種別ロジック）、そして新しいアニメーションイベント
-が必要であれば `diff.ts`/`components/canvas/` にまたがって変更することに
-なる。
+SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`、`ALTER TABLE`
+の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`
+（許可リストの拡張）、`pglite/engine.ts`（`snapshotAfter()` の文種別
+ロジック）、そして新しいアニメーションイベントが必要であれば
+`diff.ts`/`components/canvas/` にまたがって変更することになる。
 
 ビルド／テスト設定面の補足：`vite.config.ts` は `@electric-sql/pglite` を
 `optimizeDeps.exclude` に指定している（WASM/ワーカーアセットを Vite の
@@ -135,10 +168,12 @@ SQL の対応範囲を広げる場合（例：`UPDATE`、`JOIN`、複合 `WHERE`
 理由・再検討条件は [docs/routing-decision.md](docs/routing-decision.md)
 を参照。
 
-GitHub連携によるSQL実行履歴保持機能（設計モード/実験モードの切り替え、
-`schema/ddl.sql`/`query-examples.md` のプッシュ）は Issue #18 として
-計画中・未実装。仕様は [docs/github-sync-spec.md](docs/github-sync-spec.md)、
-実装方針は [docs/github-sync-design.md](docs/github-sync-design.md) を参照。
+GitHub連携によるSQL実行履歴保持機能（Issue #18）は、設計モード/実験モードの
+切り替えとモードゲート（M0〜M3）まで実装済み。`schema/ddl.sql`生成・GitHub
+PAT設定・プッシュ・`query-examples.md`昇格フロー（M4〜M6）は計画中・未実装。
+仕様は [docs/github-sync-spec.md](docs/github-sync-spec.md)、実装方針・
+マイルストーン別の進捗は
+[docs/github-sync-design.md](docs/github-sync-design.md) を参照。
 
 ## エージェント目視確認用ツール（Playwright）
 

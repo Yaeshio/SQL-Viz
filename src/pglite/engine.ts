@@ -1,5 +1,5 @@
 import type { PGlite } from '@electric-sql/pglite';
-import type { AnimationEvent, DBState, Row, WhereClause } from '../types';
+import type { AnimationEvent, AppMode, DBState, Row, WhereClause } from '../types';
 import { parseSql, type Parsed } from '../parser';
 import { diffStates } from '../diff';
 import { layoutTables } from '../layout';
@@ -16,6 +16,19 @@ export interface StatementResult {
 export interface RunResult {
   results: StatementResult[];
   parseError?: string;
+}
+
+/** github-sync-spec.md 3節の許可マトリクス。design/experimentは相互排他で、
+ * 一方が構造(CREATE/ALTER/DROP)、他方がデータ(SELECT/INSERT/UPDATE/DELETE)を担う。 */
+const MODE_ALLOWED_TYPES: Record<AppMode, ReadonlySet<Parsed['type']>> = {
+  design: new Set(['create', 'alter', 'drop']),
+  experiment: new Set(['select', 'insert', 'update', 'delete']),
+};
+
+interface DesignCheckpoint {
+  ctidMaps: Map<string, Map<string, string>>;
+  lastState: DBState;
+  rowSeq: number;
 }
 
 function quoteIdent(name: string): string {
@@ -73,6 +86,8 @@ export class PgEngine {
   private ctidMaps = new Map<string, Map<string, string>>();
   private rowSeq = 0;
   private lastState: DBState = emptyState();
+  private inExperimentTx = false;
+  private designCheckpoint: DesignCheckpoint | null = null;
 
   isReady(): boolean {
     return this.db !== null;
@@ -96,10 +111,39 @@ export class PgEngine {
     this.ctidMaps = new Map();
     this.rowSeq = 0;
     this.lastState = emptyState();
+    this.inExperimentTx = false;
+    this.designCheckpoint = null;
   }
 
   private newRowId(): string {
     return `r${(this.rowSeq++).toString(36)}`;
+  }
+
+  private cloneCtidMaps(): Map<string, Map<string, string>> {
+    const copy = new Map<string, Map<string, string>>();
+    for (const [table, inner] of this.ctidMaps) copy.set(table, new Map(inner));
+    return copy;
+  }
+
+  /**
+   * Undoes every data change (INSERT/UPDATE/DELETE) made since experiment
+   * mode was entered, via a plain Postgres ROLLBACK of the transaction opened
+   * on first experiment-mode statement. Structural statements are never
+   * allowed in experiment mode (mode gate in run()), so a ROLLBACK can never
+   * discard schema changes here. No-ops if experiment mode was never entered
+   * (or already returned from) since the last reset/init.
+   */
+  async returnToDesign(): Promise<DBState | null> {
+    if (!this.inExperimentTx || !this.designCheckpoint) return null;
+    const db = this.db!;
+    await db.query('ROLLBACK');
+    const { ctidMaps, lastState, rowSeq } = this.designCheckpoint;
+    this.ctidMaps = ctidMaps;
+    this.lastState = lastState;
+    this.rowSeq = rowSeq;
+    this.inExperimentTx = false;
+    this.designCheckpoint = null;
+    return lastState;
   }
 
   /**
@@ -120,7 +164,7 @@ export class PgEngine {
     return new Set(rows.map((r) => ctidMap.get(String(r.__ctid))).filter((id): id is string => !!id));
   }
 
-  async run(sql: string, canvasWidth: number): Promise<RunResult> {
+  async run(sql: string, canvasWidth: number, mode: AppMode): Promise<RunResult> {
     await this.ensureReady();
     const db = this.db!;
 
@@ -135,6 +179,33 @@ export class PgEngine {
       const { statements, error } = parseSql(raw);
       if (error) return { results: [], parseError: error };
       parsed.push({ raw, stmt: statements[0] });
+    }
+
+    // Mode gate: a second, independent allowlist on top of the syntax gate
+    // above (github-sync-spec.md 3節). All-or-nothing, same shape as a parse
+    // error: one disallowed statement type rejects the whole batch untouched.
+    const allowedTypes = MODE_ALLOWED_TYPES[mode];
+    const disallowed = parsed.find(({ stmt }) => !allowedTypes.has(stmt.type));
+    if (disallowed) {
+      return {
+        results: [],
+        parseError: `Statement type "${disallowed.stmt.type}" is not allowed in ${mode} mode`,
+      };
+    }
+
+    // Lazily open the experiment transaction on the first experiment-mode
+    // statement actually executed, not on the mode toggle itself, so flipping
+    // modes without running anything stays a no-op. Everything done in
+    // experiment mode (across any number of Run clicks) accumulates in this
+    // one uncommitted transaction until returnToDesign() rolls it back.
+    if (mode === 'experiment' && !this.inExperimentTx) {
+      this.designCheckpoint = {
+        ctidMaps: this.cloneCtidMaps(),
+        lastState: this.lastState,
+        rowSeq: this.rowSeq,
+      };
+      await db.query('BEGIN');
+      this.inExperimentTx = true;
     }
 
     const results: StatementResult[] = [];
