@@ -1,5 +1,8 @@
 import { PgEngine } from '../src/pglite/engine';
-import type { AnimationEvent, Column, ColumnType, DBState, Row, Table } from '../src/types';
+import { parseSql } from '../src/parser';
+import type { AnimationEvent, AppMode, Column, ColumnType, DBState, Row, Table } from '../src/types';
+
+const STRUCTURAL_TYPES = new Set(['create', 'alter', 'drop']);
 
 const CANVAS_W = 800;
 
@@ -30,13 +33,20 @@ export function makeState(tables: Table[], order?: string[], lastSelect: DBState
  * SQL文字列の配列を、新規 PgEngine 上で順に実行し（各文字列内に複数文を
  * 含んでもよい）、文ごとに生成されたイベント列を返す。engine が
  * エラーを返した場合は throw し、それ以降の文は処理しない
- * （EVENT-07 のテストで使う挙動）。
+ * （EVENT-07 のテストで使う挙動）。各リスト要素のモードは、先頭の文の種類
+ * （CREATE/ALTER/DROPならdesign、それ以外ならexperiment）から自動判定する
+ * ——このヘルパーはモードゲート自体ではなくparse→execute→diffのパイプライン
+ * を検証するためのものであり、呼び出し側（events.test.ts）に手動でモードを
+ * 指定させる意味がないため。returnToDesign()は呼ばないので、design文と
+ * experiment文をまたいでも実験モードのデータはリセットされない。
  */
 export async function runSqlStatements(sqlList: string[]): Promise<{ state: DBState; events: AnimationEvent[] }[]> {
   const engine = new PgEngine();
   const results: { state: DBState; events: AnimationEvent[] }[] = [];
   for (const sql of sqlList) {
-    const { results: stmtResults, parseError } = await engine.run(sql, CANVAS_W);
+    const { statements } = parseSql(sql);
+    const mode: AppMode = statements[0] && STRUCTURAL_TYPES.has(statements[0].type) ? 'design' : 'experiment';
+    const { results: stmtResults, parseError } = await engine.run(sql, CANVAS_W, mode);
     if (parseError) throw new Error(parseError);
     for (const r of stmtResults) {
       if (r.error) throw new Error(r.error);

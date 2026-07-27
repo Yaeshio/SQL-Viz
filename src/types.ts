@@ -1,5 +1,9 @@
 export type ColumnType = 'INT' | 'VARCHAR' | 'TEXT' | 'BOOLEAN' | 'DATE' | 'UNKNOWN';
 
+/** design: structural edits (CREATE/ALTER/DROP TABLE). experiment: data-only
+ * reads/writes (SELECT/INSERT/UPDATE/DELETE) against a fixed schema. */
+export type AppMode = 'design' | 'experiment';
+
 export interface Column {
   name: string;
   type: ColumnType;

@@ -51,7 +51,8 @@ docker run --rm -v "$(pwd)/tools/visual-check/out:/app/out" sql-viz-visual-check
 | `--url` | `http://host.docker.internal:5173` | Docker Desktopでは追加設定なしでホスト側の開発サーバに到達できる |
 | `--out` | `/app/out/screenshot.png` | スクリーンショット出力パス（コンテナ内パス。ホストに見るには `-v` でマウントすること） |
 | `--wait-for` | なし | スクリーンショット前に待機するセレクタ（Playwrightのセレクタ構文、例: `text=Run SQL`） |
-| `--click` | なし | スクリーンショット前にクリックするセレクタ |
+| `--click` | なし | スクリーンショット前にクリックするセレクタ。複数回指定すると順にクリックする（例: `--click "text=実験モード" --click "text=Run SQL"`） |
+| `--wait-after-click` | なし | クリック後・スクリーンショット前に待機するセレクタ（PGliteのコールドスタートやアニメーションなど、クリック直後にはまだDOMへ反映されていない非同期処理の完了を待つ用途） |
 | `--full-page` | `false` | フルページスクリーンショットにするか |
 | `--timeout` | `10000` | 各操作のタイムアウト（ミリ秒） |
 

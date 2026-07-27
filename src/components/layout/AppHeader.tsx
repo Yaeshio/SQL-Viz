@@ -1,12 +1,17 @@
 import { Database, Trash2 } from 'lucide-react';
+import type { AppMode } from '../../types';
+import ModeToggle from './ModeToggle';
 
 interface Props {
   tableCount: number;
   rowCount: number;
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
+  modeDisabled: boolean;
   onReset: () => void;
 }
 
-export default function AppHeader({ tableCount, rowCount, onReset }: Props) {
+export default function AppHeader({ tableCount, rowCount, mode, onModeChange, modeDisabled, onReset }: Props) {
   return (
     <header className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/60 backdrop-blur">
       <div className="flex items-center gap-2.5">
@@ -19,6 +24,7 @@ export default function AppHeader({ tableCount, rowCount, onReset }: Props) {
         </div>
       </div>
       <div className="flex items-center gap-4 text-xs text-slate-400">
+        <ModeToggle mode={mode} onChange={onModeChange} disabled={modeDisabled} />
         <span><span className="text-slate-500">tables</span> <span className="font-mono text-slate-200">{tableCount}</span></span>
         <span><span className="text-slate-500">rows</span> <span className="font-mono text-slate-200">{rowCount}</span></span>
         <button

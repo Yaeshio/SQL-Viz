@@ -7,11 +7,21 @@ interface Props {
   error: string | null;
   playing: boolean;
   initializing: boolean;
+  modeTransitioning: boolean;
   onRun: () => void;
   log: string[];
 }
 
-export default function SqlEditorPane({ sql, onSqlChange, error, playing, initializing, onRun, log }: Props) {
+export default function SqlEditorPane({
+  sql,
+  onSqlChange,
+  error,
+  playing,
+  initializing,
+  modeTransitioning,
+  onRun,
+  log,
+}: Props) {
   return (
     <section className="w-[420px] shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/40">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-500">
@@ -32,10 +42,11 @@ export default function SqlEditorPane({ sql, onSqlChange, error, playing, initia
       <div className="p-3 border-t border-slate-800 flex items-center gap-2">
         <button
           onClick={onRun}
-          disabled={playing || initializing}
+          disabled={playing || initializing || modeTransitioning}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-semibold text-sm transition"
         >
-          <Play size={15} /> {initializing ? 'エンジン読込中…' : playing ? 'Running…' : 'Run SQL'}
+          <Play size={15} />{' '}
+          {initializing ? 'エンジン読込中…' : modeTransitioning ? 'モード切替中…' : playing ? 'Running…' : 'Run SQL'}
         </button>
       </div>
       <ExecutionLogPanel log={log} />
