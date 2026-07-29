@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import { SAMPLE } from './constants/sampleSql';
 import { useAppMode } from './hooks/useAppMode';
 import { useSqlRunner } from './hooks/useSqlRunner';
+import { useGitHubSettings } from './hooks/useGitHubSettings';
 import AppHeader from './components/layout/AppHeader';
 import CanvasPane from './components/layout/CanvasPane';
 import SqlEditorPane from './components/sql-editor/SqlEditorPane';
+import GitHubSettingsPanel from './components/github/GitHubSettingsPanel';
 
 export default function App() {
   const { mode, setMode } = useAppMode();
+  const { settings, setSettings } = useGitHubSettings();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const {
     sql,
     setSql,
@@ -26,6 +31,7 @@ export default function App() {
     canvasRef,
     run,
     reset,
+    getDb,
   } = useSqlRunner(SAMPLE, mode);
 
   const handleReset = () => {
@@ -42,6 +48,16 @@ export default function App() {
         onModeChange={setMode}
         modeDisabled={playing || initializing || modeTransitioning}
         onReset={handleReset}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <GitHubSettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        onSettingsChange={setSettings}
+        mode={mode}
+        order={state.order}
+        getDb={getDb}
       />
 
       <div className="flex-1 flex min-h-0">

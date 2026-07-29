@@ -31,7 +31,7 @@ interface DesignCheckpoint {
   rowSeq: number;
 }
 
-function quoteIdent(name: string): string {
+export function quoteIdent(name: string): string {
   return `"${name.toLowerCase().replace(/"/g, '""')}"`;
 }
 
@@ -91,6 +91,13 @@ export class PgEngine {
 
   isReady(): boolean {
     return this.db !== null;
+  }
+
+  /** Exposes the underlying PGlite instance for read-only introspection
+   * (e.g. ddlExport.ts querying information_schema). db itself stays
+   * private; this is the only sanctioned way to reach it from outside. */
+  getDb(): PGlite | null {
+    return this.db;
   }
 
   ensureReady(): Promise<void> {
