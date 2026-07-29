@@ -1,4 +1,4 @@
-import { Database, Trash2 } from 'lucide-react';
+import { Database, Settings, Trash2 } from 'lucide-react';
 import type { AppMode } from '../../types';
 import ModeToggle from './ModeToggle';
 
@@ -9,9 +9,10 @@ interface Props {
   onModeChange: (mode: AppMode) => void;
   modeDisabled: boolean;
   onReset: () => void;
+  onOpenSettings: () => void;
 }
 
-export default function AppHeader({ tableCount, rowCount, mode, onModeChange, modeDisabled, onReset }: Props) {
+export default function AppHeader({ tableCount, rowCount, mode, onModeChange, modeDisabled, onReset, onOpenSettings }: Props) {
   return (
     <header className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/60 backdrop-blur">
       <div className="flex items-center gap-2.5">
@@ -32,6 +33,13 @@ export default function AppHeader({ tableCount, rowCount, mode, onModeChange, mo
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-700 hover:border-slate-500 hover:bg-slate-800 transition text-slate-300"
         >
           <Trash2 size={13} /> Reset
+        </button>
+        <button
+          onClick={onOpenSettings}
+          aria-label="GitHub連携設定"
+          className="flex items-center justify-center w-7 h-7 rounded-md border border-slate-700 hover:border-slate-500 hover:bg-slate-800 transition text-slate-300"
+        >
+          <Settings size={13} />
         </button>
       </div>
     </header>

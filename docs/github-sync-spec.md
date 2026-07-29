@@ -176,17 +176,19 @@ SQLの構文的妥当性を検証し、後者は「今のモードでその文�
 | **M2** 新規AnimationEvent種別とcanvas対応 | 完了 | M1で新たに発生するテーブル削除・カラム追加/削除・行更新・行削除を画面上でアニメーション表示できるようにする。M3以降がユーザーに結果を見せるための前提工程。**目視確認（`/visual-check`）は本セッションのサンドボックス環境でDockerが利用できず未実施**（typecheck/lint/testの自動検証は完了）。 | — （UI表現の前提整備。仕様上の新規節はない） |
 | **M3** モード概念とゲーティングUI | 完了 | 設計モード/実験モードの切り替えUI（`ModeToggle`）と、3節のSQL許可マトリクスを実際に強制するモードゲート（`PgEngine.run()`の`mode`引数）を実装した。実験モード→設計モード復帰時のデータリセット（3節）は、実験モード中の全文をPostgresトランザクションに乗せ、復帰時に`ROLLBACK`する方式（`PgEngine.returnToDesign()`）で実現した。 | 2節・3節 |
 | **M4** `schema/ddl.sql` 生成 | 完了 | PGliteの `information_schema` から実際にDDL文字列を生成する機能を実装した（`src/pglite/ddlExport.ts` の `generateDdl()`）。GitHubへの実プッシュ・プッシュUIはM5のスコープであり本マイルストーンには含まない。 | 4節 |
-| **M5** GitHub PAT/リポジトリ設定とプッシュクライアント | 未着手 | 6節・7節の認証・保存方式に従い、GitHub Contents APIへの接続とスキーマのプッシュを実装する。**着手前に10節に記載のCORS未決事項の解消が必須**。 | 6節・7節 |
+| **M5** GitHub PAT/リポジトリ設定とプッシュクライアント | 完了 | 6節・7節の認証・保存方式に従い、GitHub Contents APIへの接続とスキーマのプッシュを実装した（`src/github/client.ts`・`src/github/pushSchema.ts`・`GitHubSettingsPanel`）。着手前提だった10節のCORS未決事項は実機検証により解消済み。 | 6節・7節 |
 | **M6** 昇格フローと `query-examples.md` プッシュ | 未着手 | 5節の仕様に従い、実験モードのSELECT結果を昇格し、`localStorage` を経てGitHubへプッシュする機能を実装する。 | 5節 |
 
 ## 10. 未決事項
 
-- **GitHub Contents APIへのブラウザ発 `PUT` のCORS実現可否。** 現時点
-  では未検証。`api.github.com` がブラウザオリジンからの認証付き `PUT`
-  を許可するかどうかは、実装着手前に実機検証する必要がある。もし
-  許可されない場合、サーバーレスプロキシ等の追加が必要になり、
-  「バックエンドを持たない」というこのドキュメント全体の前提が崩れる
-  ため、その場合は改めてユーザーと方針を確認する。
+- ~~**GitHub Contents APIへのブラウザ発 `PUT` のCORS実現可否。**~~
+  **解消済み（M5実装時に実機検証）**: `api.github.com` へのCORSプリフ
+  ライト（`OPTIONS`、パブリックリポジトリ対象）を実機から送信した結果、
+  `access-control-allow-methods` に `PUT` が、`access-control-allow-headers`
+  に `Authorization`/`Content-Type` が含まれ、`access-control-allow-origin: *`
+  であることを確認した。ブラウザ発の認証付き `PUT` はCORS的に成立し、
+  サーバーレスプロキシ等の追加は不要（「バックエンドを持たない」という
+  本ドキュメント全体の前提は崩れない）。
 
 その他の主要な設計判断（モード切替時のデータリセット方針、
 `ALTER TABLE` のMVPスコープ、リレーションのスコープ外化、

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import type { PGlite } from '@electric-sql/pglite';
 import type { AppMode, DBState } from '../types';
 import { emptyState } from '../reducer';
 import { diffStates } from '../diff';
@@ -39,6 +40,7 @@ export interface UseSqlRunnerResult {
   canvasRef: RefObject<HTMLDivElement>;
   run: () => Promise<void>;
   reset: () => void;
+  getDb: () => PGlite | null;
 }
 
 /** Owns SQL editor input, DBState, execution log/error/playing flags, and
@@ -149,6 +151,8 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
   const tableCount = state.order.length;
   const rowCount = useMemo(() => state.order.reduce((n, t) => n + state.tables[t].rows.length, 0), [state]);
 
+  const getDb = useCallback(() => engineRef.current?.getDb() ?? null, []);
+
   return {
     sql,
     setSql,
@@ -168,5 +172,6 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     canvasRef,
     run,
     reset,
+    getDb,
   };
 }

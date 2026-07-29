@@ -215,7 +215,7 @@ COLUMN` は既存行の `values` に新キーを `NULL` で追加し、`DROP COL
   `SqlEditorPane`（または `ExecutionLogPanel.tsx`）に、実験モードかつ
   `type === 'select'` のログ行にのみ「昇格」ボタンを表示する。
 
-## 9. GitHub Contents API連携
+## 9. GitHub Contents API連携（M5で実装済み）
 
 **依存関係の決定**: 新規パッケージを追加せず、`fetch()` ベースの
 `src/github/client.ts` を自前実装する。
@@ -246,11 +246,11 @@ COLUMN` は既存行の `values` に新キーを `NULL` で追加し、`DROP COL
   （8節）+ `client.putFile()` を組み合わせ、`query-examples.md` へ
   プッシュする（github-sync-spec.md 5節の通りリネームないし上書き。
   マージは行わない）。
-- **着手前に必須の検証（未検証・github-sync-spec.md 9節）**: `api.github.com`
-  への認証付きブラウザ発 `PUT` がCORS的に成立するか。失敗した場合は
-  サーバーレスプロキシ等のバックエンド追加が必要になり、この設計書
-  全体の前提（バックエンドなし）が崩れるため、その場合はユーザーに
-  確認を取った上で方針を再検討する。
+- **着手前提だった検証（解消済み・github-sync-spec.md 10節）**:
+  `api.github.com` への認証付きブラウザ発 `PUT` のCORS成立可否。M5着手時
+  にCORSプリフライトを実機から送信し、`PUT`・`Authorization`・
+  `Content-Type` すべてが許可されていることを確認したため、サーバーレス
+  プロキシ等のバックエンド追加は不要と判断した。
 
 ## 10. 追加UIコンポーネント
 
@@ -319,7 +319,7 @@ COLUMN` は既存行の `values` に新キーを `NULL` で追加し、`DROP COL
 
 ## 13. 未決事項
 
-[github-sync-spec.md](./github-sync-spec.md) 9節を参照
-（GitHub Contents APIへのブラウザ発 `PUT` のCORS実現可否、M5着手前に
-実機検証が必要）。それ以外の主要な設計判断はユーザー確認済みの確定
-事項として本ドキュメント各節に反映済み。
+M5着手前に必須だったCORS実現可否の検証は完了・解消済み
+（[github-sync-spec.md](./github-sync-spec.md) 10節参照）。それ以外の
+主要な設計判断はユーザー確認済みの確定事項として本ドキュメント各節に
+反映済み。現時点で残る未決事項はない。
