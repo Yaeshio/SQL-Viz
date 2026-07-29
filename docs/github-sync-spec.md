@@ -175,7 +175,7 @@ SQLの構文的妥当性を検証し、後者は「今のモードでその文�
 | **M1** parser/engineのSQL対応拡張 | 完了 | `ALTER TABLE`（単一 `ADD COLUMN`/`DROP COLUMN` のみ）・`DROP TABLE`・`UPDATE`・`DELETE` を実行可能にする。この時点ではモードによる制限は行わず、全文種が実行できる状態になる（モードゲート自体はM3で追加）。既存の「UPDATE/DELETEは非対応」とする既存テスト・ドキュメント記述の書き換えを伴う。 | 3節（許可マトリクスに列挙されたSQL文種そのものの実装） |
 | **M2** 新規AnimationEvent種別とcanvas対応 | 完了 | M1で新たに発生するテーブル削除・カラム追加/削除・行更新・行削除を画面上でアニメーション表示できるようにする。M3以降がユーザーに結果を見せるための前提工程。**目視確認（`/visual-check`）は本セッションのサンドボックス環境でDockerが利用できず未実施**（typecheck/lint/testの自動検証は完了）。 | — （UI表現の前提整備。仕様上の新規節はない） |
 | **M3** モード概念とゲーティングUI | 完了 | 設計モード/実験モードの切り替えUI（`ModeToggle`）と、3節のSQL許可マトリクスを実際に強制するモードゲート（`PgEngine.run()`の`mode`引数）を実装した。実験モード→設計モード復帰時のデータリセット（3節）は、実験モード中の全文をPostgresトランザクションに乗せ、復帰時に`ROLLBACK`する方式（`PgEngine.returnToDesign()`）で実現した。 | 2節・3節 |
-| **M4** `schema/ddl.sql` 生成 | 未着手 | PGliteの `information_schema` から実際にDDL文字列を生成する機能を実装する。 | 4節 |
+| **M4** `schema/ddl.sql` 生成 | 完了 | PGliteの `information_schema` から実際にDDL文字列を生成する機能を実装した（`src/pglite/ddlExport.ts` の `generateDdl()`）。GitHubへの実プッシュ・プッシュUIはM5のスコープであり本マイルストーンには含まない。 | 4節 |
 | **M5** GitHub PAT/リポジトリ設定とプッシュクライアント | 未着手 | 6節・7節の認証・保存方式に従い、GitHub Contents APIへの接続とスキーマのプッシュを実装する。**着手前に10節に記載のCORS未決事項の解消が必須**。 | 6節・7節 |
 | **M6** 昇格フローと `query-examples.md` プッシュ | 未着手 | 5節の仕様に従い、実験モードのSELECT結果を昇格し、`localStorage` を経てGitHubへプッシュする機能を実装する。 | 5節 |
 

@@ -176,7 +176,7 @@ COLUMN` は既存行の `values` に新キーを `NULL` で追加し、`DROP COL
 `src/hooks/useAnimationPlayer.ts` の内部状態（`appearingRows`/
 `filteringRows`/`highlight`）に、削除・更新系の状態を追加する。
 
-## 7. `schema/ddl.sql` 生成
+## 7. `schema/ddl.sql` 生成（M4で実装済み）
 
 - `src/pglite/ddlExport.ts`（新規）— `src/lib/` ではなく `src/pglite/`
   配下に置く。理由: [CLAUDE.md](../CLAUDE.md) が明記する通り、
