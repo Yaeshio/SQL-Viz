@@ -168,9 +168,11 @@ SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`�
 理由・再検討条件は [docs/routing-decision.md](docs/routing-decision.md)
 を参照。
 
-GitHub連携によるSQL実行履歴保持機能（Issue #18）は、設計モード/実験モードの
-切り替えとモードゲート（M0〜M3）まで実装済み。`schema/ddl.sql`生成・GitHub
-PAT設定・プッシュ・`query-examples.md`昇格フロー（M4〜M6）は計画中・未実装。
+GitHub連携によるSQL実行履歴保持機能は、旧Issue #18（M0〜M5：設計モード/
+実験モードの切り替え、モードゲート、`schema/ddl.sql`生成、GitHub PAT設定・
+プッシュ）の完了をもってクローズ済み。残るM6（`query-examples.md`昇格
+フロー）はIssue #24へ、GitHub認証UXの改善（PAT直貼りからの移行検討）は
+Issue #23へそれぞれ切り出されており、#23の方針確定後に#24へ着手する。
 仕様は [docs/github-sync-spec.md](docs/github-sync-spec.md)、実装方針・
 マイルストーン別の進捗は
 [docs/github-sync-design.md](docs/github-sync-design.md) を参照。
