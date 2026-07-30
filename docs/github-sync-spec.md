@@ -177,7 +177,7 @@ SQLの構文的妥当性を検証し、後者は「今のモードでその文�
 | **M3** モード概念とゲーティングUI | 完了 | 設計モード/実験モードの切り替えUI（`ModeToggle`）と、3節のSQL許可マトリクスを実際に強制するモードゲート（`PgEngine.run()`の`mode`引数）を実装した。実験モード→設計モード復帰時のデータリセット（3節）は、実験モード中の全文をPostgresトランザクションに乗せ、復帰時に`ROLLBACK`する方式（`PgEngine.returnToDesign()`）で実現した。 | 2節・3節 |
 | **M4** `schema/ddl.sql` 生成 | 完了 | PGliteの `information_schema` から実際にDDL文字列を生成する機能を実装した（`src/pglite/ddlExport.ts` の `generateDdl()`）。GitHubへの実プッシュ・プッシュUIはM5のスコープであり本マイルストーンには含まない。 | 4節 |
 | **M5** GitHub PAT/リポジトリ設定とプッシュクライアント | 完了 | 6節・7節の認証・保存方式に従い、GitHub Contents APIへの接続とスキーマのプッシュを実装した（`src/github/client.ts`・`src/github/pushSchema.ts`・`GitHubSettingsPanel`）。着手前提だった10節のCORS未決事項は実機検証により解消済み。 | 6節・7節 |
-| **M6** 昇格フローと `query-examples.md` プッシュ | 未着手 | 5節の仕様に従い、実験モードのSELECT結果を昇格し、`localStorage` を経てGitHubへプッシュする機能を実装する。 | 5節 |
+| **M6** 昇格フローと `query-examples.md` プッシュ | 未着手（[Issue #24](https://github.com/Yaeshio/SQL-Viz/issues/24)へ分離、[Issue #23](https://github.com/Yaeshio/SQL-Viz/issues/23)の結論待ち） | 5節の仕様に従い、実験モードのSELECT結果を昇格し、`localStorage` を経てGitHubへプッシュする機能を実装する。旧Issue #18は M0〜M5 完了をもってクローズ済み。 | 5節 |
 
 ## 10. 未決事項
 
