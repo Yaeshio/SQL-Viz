@@ -30,3 +30,6 @@ verify*.mjs
 # エージェント目視確認用ツール（tools/visual-check、Issue #13）の出力先
 tools/visual-check/out/
 tools/visual-check/node_modules/
+
+# CLI版Claude Codeが実装計画・設計メモの中間成果物を置く作業用ディレクトリ
+.claude/local-plans/
