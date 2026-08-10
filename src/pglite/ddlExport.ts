@@ -28,8 +28,8 @@ function formatColumnType(col: InformationSchemaColumn): string {
  * Generates CREATE TABLE DDL for the given tables, in `order`, from PGlite's
  * information_schema — not from DBState — so precision that normalizeType()
  * rounds away (e.g. VARCHAR(50)'s length) survives the export
- * (github-sync-spec.md 4節). Constraints (PK/FK/NOT NULL/DEFAULT) are out of
- * MVP scope, matching the same section.
+ * (mode-and-sql-scope-spec.md 3節). Constraints (PK/FK/NOT NULL/DEFAULT) are
+ * out of MVP scope, matching the same section.
  */
 export async function generateDdl(db: PGlite, order: string[]): Promise<string> {
   const statements: string[] = [];

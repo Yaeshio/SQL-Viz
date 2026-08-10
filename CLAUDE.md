@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `npm install` — 依存関係のインストール
 - `npm run dev` — Vite の開発サーバーを起動（デフォルトは `http://localhost:5173`）
+- `npm run sql-studio -- <path/to/schema.sql>` — ローカルCLIモード。指定
+  ファイルをサイレントに読み込み、Save/Reloadボタンでファイルと同期する
+  （Issue #26、[docs/local-cli-sync-spec.md](docs/local-cli-sync-spec.md)参照。
+  Node 22.6以上が必要）
 - `npm run build` — 本番用ビルド（`vite build`）
 - `npm run preview` — 本番ビルドのプレビュー
 - `npm run lint` — プロジェクト全体への ESLint 実行
@@ -24,7 +28,13 @@ import する。
 [PGlite](https://pglite.dev/)（WebAssembly にコンパイルされた本物の
 PostgreSQL）に対してブラウザ内で実際に実行し、その DB 状態への影響を
 アニメーションで見せる（Issue #8 で PGlite を導入。それ以前は手書きの
-JS ロジックで DB 状態を模していた）。
+JS ロジックで DB 状態を模していた）。ただし、ローカルCLIモード
+（`npm run sql-studio -- <path>`、Issue #26）で起動した場合に限り、
+スキーマファイルの読み書きを担う開発用ローカルサーバー（Vite dev server
+へのプラグイン注入によるもので、`vite.config.ts` 自体は変更しない）が
+付随する。Vercel本番デプロイは引き続きバックエンドを持たない静的SPAの
+ままであり、この機能自体を持たない（詳細は
+[docs/local-cli-sync-spec.md](docs/local-cli-sync-spec.md) を参照）。
 
 SQLパイプラインの純粋ロジック層（`types.ts`/`parser.ts`/`reducer.ts`/
 `layout.ts`/`diff.ts`）は `src/` 直下にフラット配置（`tests/`
@@ -137,6 +147,12 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    遷移を検出する内部 `useEffect` が `PgEngine.returnToDesign()` を呼び、
    その差分を通常のアニメーションとして再生する（`modeTransitioning`
    stateがこの間 `true` になり、Run ボタンと `ModeToggle` を無効化する）。
+   `run()` はIssue #26でオプション引数
+   `RunOptions`（`{ sql?: string; silent?: boolean }`）を受け取れるよう
+   拡張されている（既存の引数なし呼び出しとは完全に後方互換）。
+   `sql` 指定時はエディタの `sql` stateも同時に更新し、`silent: true` は
+   実行ログへの書き込みのみを抑制する（アニメーションは通常通り再生する）。
+   ローカルCLIモードの起動時サイレント自動ロード（後述）に使われる。
 
 **描画** — `components/canvas/Canvas.tsx` は各テーブルを
 `components/canvas/TableNode.tsx` として、`framer-motion`
@@ -168,14 +184,17 @@ SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`�
 理由・再検討条件は [docs/routing-decision.md](docs/routing-decision.md)
 を参照。
 
-GitHub連携によるSQL実行履歴保持機能は、旧Issue #18（M0〜M5：設計モード/
-実験モードの切り替え、モードゲート、`schema/ddl.sql`生成、GitHub PAT設定・
-プッシュ）の完了をもってクローズ済み。残るM6（`query-examples.md`昇格
-フロー）はIssue #24へ、GitHub認証UXの改善（PAT直貼りからの移行検討）は
-Issue #23へそれぞれ切り出されており、#23の方針確定後に#24へ着手する。
-仕様は [docs/github-sync-spec.md](docs/github-sync-spec.md)、実装方針・
-マイルストーン別の進捗は
-[docs/github-sync-design.md](docs/github-sync-design.md) を参照。
+スキーマの永続化は、旧Issue #18で実装したGitHub PAT + Contents API直接push
+方式から、Issue #26でローカルCLI経由のファイル同期方式（`npm run sql-studio
+-- <path>`）へ移行済み。CLIが起動するローカルVite dev serverに
+`GET`/`POST /api/schema` を提供するプラグインを注入し、アプリはそのAPIへの
+読み書きに徹する（`git add`/`commit`/`push`の自動化は行わない）。旧方式の
+GitHub認証層（`src/github/`, `useGitHubSettings.ts`, `GitHubSettingsPanel`）
+はIssue #26で削除済み。GitHub認証UXの改善を検討していたIssue #23は前提が
+消滅しクローズ、`query-examples.md`昇格フローのIssue #24もスコープ外化し
+クローズ済み。仕様は
+[docs/local-cli-sync-spec.md](docs/local-cli-sync-spec.md)、実装詳細は
+[docs/local-cli-sync-design.md](docs/local-cli-sync-design.md) を参照。
 
 ## エージェント目視確認用ツール（Playwright）
 

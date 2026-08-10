@@ -146,7 +146,7 @@ function parseWhere(w: unknown): WhereClause | null {
 const CREATE_ALLOWED_FIELDS = new Set(['type', 'keyword', 'table', 'create_definitions']);
 const INSERT_ALLOWED_FIELDS = new Set(['type', 'table', 'columns', 'values', 'prefix']);
 const SELECT_ALLOWED_FIELDS = new Set(['type', 'columns', 'from', 'where', 'into', 'options', 'collate']);
-// MVPスコープは単一の ADD COLUMN / DROP COLUMN のみ（github-sync-spec.md 3節・8節）。
+// MVPスコープは単一の ADD COLUMN / DROP COLUMN のみ（mode-and-sql-scope-spec.md 4節）。
 // `if_exists`/`prefix`（ALTER TABLE IF EXISTS）はいずれも許可リストに含めないことで、
 // 値が populate された場合に assertNoExtraClauses が Unsupported clause として拒否する。
 const ALTER_ALLOWED_FIELDS = new Set(['type', 'keyword', 'table', 'expr']);

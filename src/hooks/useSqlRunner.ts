@@ -21,6 +21,16 @@ function reducer(state: DBState, action: Action): DBState {
   }
 }
 
+export interface RunOptions {
+  /** SQL to run instead of the current editor contents. Also replaces the
+   * editor's `sql` state, so the editor and canvas never fall out of sync. */
+  sql?: string;
+  /** Suppresses the execution log (no "No statements run yet." reset, no
+   * per-statement log lines) for the startup auto-load — animations still
+   * play normally. Does not suppress errors. */
+  silent?: boolean;
+}
+
 export interface UseSqlRunnerResult {
   sql: string;
   setSql: (value: string) => void;
@@ -38,7 +48,7 @@ export interface UseSqlRunnerResult {
   appearingColumns: Set<string>;
   highlight: AnimationHighlight | null;
   canvasRef: RefObject<HTMLDivElement>;
-  run: () => Promise<void>;
+  run: (options?: RunOptions) => Promise<void>;
   reset: () => void;
   getDb: () => PGlite | null;
 }
@@ -100,45 +110,51 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     };
   }, [mode, playEvents]);
 
-  const run = useCallback(async () => {
-    setError(null);
-    const engine = engineRef.current!;
+  const run = useCallback(
+    async (options?: RunOptions) => {
+      setError(null);
+      const engine = engineRef.current!;
+      const silent = options?.silent ?? false;
+      const effectiveSql = options?.sql ?? sql;
+      if (options?.sql !== undefined) setSql(options.sql);
 
-    if (!engine.isReady()) {
-      setInitializing(true);
-      try {
-        await engine.ensureReady();
-      } finally {
-        setInitializing(false);
+      if (!engine.isReady()) {
+        setInitializing(true);
+        try {
+          await engine.ensureReady();
+        } finally {
+          setInitializing(false);
+        }
       }
-    }
 
-    const { results, parseError } = await engine.run(sql, canvasRef.current?.clientWidth ?? 800, mode);
-    if (parseError) {
-      setError(parseError);
-      return;
-    }
-    if (results.length === 0) {
-      setError('No executable statements found.');
-      return;
-    }
-
-    setPlaying(true);
-    setLog([]);
-    resetAnimation();
-
-    for (const r of results) {
-      if (r.error) {
-        setError(r.error);
-        setPlaying(false);
+      const { results, parseError } = await engine.run(effectiveSql, canvasRef.current?.clientWidth ?? 800, mode);
+      if (parseError) {
+        setError(parseError);
         return;
       }
-      pushLog(r.label);
-      dispatch({ type: 'set', state: r.state });
-      await playEvents(r.events);
-    }
-    setPlaying(false);
-  }, [sql, mode, pushLog, playEvents, resetAnimation]);
+      if (results.length === 0) {
+        setError('No executable statements found.');
+        return;
+      }
+
+      setPlaying(true);
+      if (!silent) setLog([]);
+      resetAnimation();
+
+      for (const r of results) {
+        if (r.error) {
+          setError(r.error);
+          setPlaying(false);
+          return;
+        }
+        if (!silent) pushLog(r.label);
+        dispatch({ type: 'set', state: r.state });
+        await playEvents(r.events);
+      }
+      setPlaying(false);
+    },
+    [sql, mode, pushLog, playEvents, resetAnimation],
+  );
 
   const reset = useCallback(() => {
     engineRef.current?.reset();

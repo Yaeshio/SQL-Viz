@@ -29,6 +29,12 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
 - 複数の SQL 文をセミコロン区切りで一括入力し、1文ずつ順番にアニメーション再生
 - パースエラー時はエラーメッセージを表示し、直前の状態を保持（ロールバック）
 - 実行中（アニメーション再生中）は実行ボタンを無効化し、状態の競合を防止
+- ローカルCLI経由でのスキーマ永続化（`npm run sql-studio -- <path>`） —
+  指定したファイルをブラウザ起動時にサイレントで読み込んでキャンバスへ
+  復元し、Save/Reloadボタンでファイルと同期できる（詳細は「セットアップ」
+  節を参照）。**このホスティング版（Vercel）にはこの機能がなく、デモ用途
+  に限られる**。実際の設計作業に使いたい場合は、リポジトリをローカルへ
+  インストールして `npm run sql-studio` 経由で使うことを推奨する
 
 ### 現時点でのスコープ外
 
@@ -127,12 +133,29 @@ SQL を入力し「Run SQL」を押すと、右側のキャンバスでアニメ
 されます。これは PGlite の初回コールドスタートによるもので、`npm install`
 や `npm run dev` 自体に追加の手順は必要ありません。
 
+### ローカルCLIモード（スキーマの永続化）
+
+```bash
+npm run sql-studio -- schema/ddl.sql
+```
+
+CLIがローカルの Vite dev server を起動し、既定のブラウザを自動で開きます
+（`npm run dev` との違いは、指定したファイルの読み書きを担うAPIが
+付随する点のみ）。指定ファイルが存在すればブラウザ起動時に自動で
+（実行ログを表示せず）キャンバスへ復元し、存在しなければ空のキャンバス
+から開始します。ヘッダーの Save ボタンで現在のスキーマをファイルへ書き出し、
+Reload ボタンでファイルの内容を読み込み直せます。`git add`/`commit`/`push`
+は自動化されないため、コミットは通常通り自分で行ってください。詳細は
+[`docs/local-cli-sync-spec.md`](docs/local-cli-sync-spec.md) を参照して
+ください。Node 22.6 以上が必要です。
+
 ## コマンド
 
 | コマンド | 説明 |
 |---|---|
 | `npm install` | 依存関係のインストール |
 | `npm run dev` | Vite の開発サーバーを起動 |
+| `npm run sql-studio -- <path>` | ローカルCLIモードで起動（スキーマファイルの読み書きが可能） |
 | `npm run build` | 本番用ビルド（`vite build`） |
 | `npm run preview` | 本番ビルドのプレビュー |
 | `npm run lint` | ESLint 実行 |
@@ -165,15 +188,24 @@ src/
   hooks/
     useSqlRunner.ts       # PgEngineの保持・SQL実行パイプラインの駆動
     useAnimationPlayer.ts # アニメーション再生タイミング制御
+    useLocalSync.ts       # ローカルCLIモードのSave/Reload状態管理
   lib/
     canvasLayout.ts # テーブル内部（列/行のy座標・セル切り詰め・viewBox）の純粋計算
+  local/
+    apiPlugin.ts     # Vite dev serverプラグイン（GET/POST /api/schema）
+    localSync.ts     # ブラウザ側のfetchラッパー（isLocalMode/fetchSchema/saveSchema）
   components/
     layout/         # ヘッダー・キャンバスペイン等の画面全体レイアウト部品
     sql-editor/      # SQLエディタペイン・実行ログパネル
     canvas/          # SVG + framer-motion によるテーブル/行の描画
+    local/           # ローカルCLIモードのSave/Reloadボタン（LocalSyncControls）
+scripts/
+  openLocal.mjs      # `npm run sql-studio` のCLIエントリポイント
 docs/
   Sql animation tool spec .md   # 元の仕様書（設計意図・将来ロードマップ）
   routing-decision.md           # ルーティング非対応の決定と理由
+  local-cli-sync-spec.md        # ローカルCLI永続化の仕様（何を・なぜ）
+  local-cli-sync-design.md      # ローカルCLI永続化の実装詳細
 tests/
   *.test.ts    # Vitest ユニットテスト
 ```
@@ -183,5 +215,8 @@ tests/
 - 外部・サーバーのデータベースへの接続は行わない。SQL は PGlite（ブラウザ
   タブ内で完結する WebAssembly 版 PostgreSQL）に対して実行され、ネットワーク
   通信を一切伴わない、という意味ですべてクライアントサイドで完結する
+  （ただしローカルCLIモードで起動した場合に限り、ブラウザは同一マシン上の
+  `127.0.0.1` にのみバインドされたローカルサーバーとスキーマファイルを
+  やり取りする。外部データベースやリモートサーバーへの通信ではない）
 - 1テーブルあたりの表示行数は多量データの可視化を想定していない（プロトタイプ規模を想定）
 - 対応 SQL は ANSI 標準に近いサブセットのみで、方言固有拡張（MySQL/PostgreSQL 独自構文など）は非対応
