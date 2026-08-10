@@ -1,5 +1,5 @@
 // Default textarea contents match the default mode ('design'): CREATE TABLE
-// is the only statement type design mode allows (github-sync-spec.md 3節).
+// is the only statement type design mode allows (mode-and-sql-scope-spec.md 2節).
 // The INSERT/SELECT example lines are commented out and placed before the
 // only real statement (not after its trailing ';') so splitStatements()
 // folds them into the same segment as CREATE TABLE instead of becoming a

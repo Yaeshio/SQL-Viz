@@ -59,8 +59,8 @@ Issue #2 には次のフォローアップコメントがある。
 伝えることを優先し、当初（Phase 1 MVP）は選定範囲に含めなかった。
 
 その後 Issue #18 M1 により、GitHub連携機能（設計モード/実験モードの切り替え）の
-前提として以下を選定範囲に追加した（[github-sync-spec.md](./github-sync-spec.md)
-3節「モード別SQL文許可マトリクス」参照）。
+前提として以下を選定範囲に追加した（[mode-and-sql-scope-spec.md](./mode-and-sql-scope-spec.md)
+2節「モード別SQL文許可マトリクス」参照）。
 
 - `ALTER TABLE table ADD COLUMN col type` / `ALTER TABLE table DROP COLUMN col`
   （単一アクションのみ。複数アクション同時指定・`RENAME`・型変更は対象外）
@@ -72,7 +72,7 @@ Issue #2 には次のフォローアップコメントがある。
 
 これらは P1・P2 のゴールデンパスの拡張ではなく、設計モード（スキーマ編集）と
 実験モード（データ操作）双方の土台として選定されたものである（詳細な動機は
-[github-sync-spec.md](./github-sync-spec.md) 1〜2節を参照）。
+[mode-and-sql-scope-spec.md](./mode-and-sql-scope-spec.md) 1節を参照）。
 
 ## 4. 対応SQL文ごとのユーザーストーリー
 

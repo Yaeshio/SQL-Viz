@@ -18,7 +18,7 @@ export interface RunResult {
   parseError?: string;
 }
 
-/** github-sync-spec.md 3節の許可マトリクス。design/experimentは相互排他で、
+/** mode-and-sql-scope-spec.md 2節の許可マトリクス。design/experimentは相互排他で、
  * 一方が構造(CREATE/ALTER/DROP)、他方がデータ(SELECT/INSERT/UPDATE/DELETE)を担う。 */
 const MODE_ALLOWED_TYPES: Record<AppMode, ReadonlySet<Parsed['type']>> = {
   design: new Set(['create', 'alter', 'drop']),
@@ -189,7 +189,7 @@ export class PgEngine {
     }
 
     // Mode gate: a second, independent allowlist on top of the syntax gate
-    // above (github-sync-spec.md 3節). All-or-nothing, same shape as a parse
+    // above (mode-and-sql-scope-spec.md 2節). All-or-nothing, same shape as a parse
     // error: one disallowed statement type rejects the whole batch untouched.
     const allowedTypes = MODE_ALLOWED_TYPES[mode];
     const disallowed = parsed.find(({ stmt }) => !allowedTypes.has(stmt.type));

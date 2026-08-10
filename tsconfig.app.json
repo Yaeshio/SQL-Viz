@@ -14,11 +14,15 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* scripts/openLocal.mjs (CLI entry, Issue #26) is plain JS imported from
+       tests/openLocal.test.ts; without this TS can't type it at all. */
+    "allowJs": true,
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "scripts"]
 }
