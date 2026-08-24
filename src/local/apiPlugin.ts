@@ -1,25 +1,7 @@
-import type { Connect, Plugin, ViteDevServer } from 'vite';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import type { Plugin, ViteDevServer } from 'vite';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { ServerResponse } from 'node:http';
-
-async function readRequestBody(req: Connect.IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString('utf-8');
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(body));
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+import { errorMessage, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
 
 /** Vite dev-server plugin exposing GET/POST /api/schema, scoped to a single
  * file path fixed at plugin-construction time (CLI startup) — the path is
@@ -33,12 +15,7 @@ export function buildApiPlugin(filePath: string): Plugin {
       server.middlewares.use('/api/schema', async (req, res, next) => {
         try {
           if (req.method === 'GET') {
-            let content = '';
-            try {
-              content = await readFile(filePath, 'utf-8');
-            } catch (err) {
-              if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-            }
+            const content = await readDdlFile(filePath);
             sendJson(res, 200, { content });
             return;
           }

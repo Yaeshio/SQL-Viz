@@ -1,10 +1,10 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { AnimationEvent, AppMode, DBState, Row, WhereClause } from '../types';
-import { parseSql, type Parsed } from '../parser';
-import { diffStates } from '../diff';
-import { layoutTables } from '../layout';
-import { cloneState, emptyState } from '../reducer';
-import { splitStatements } from './splitStatements';
+import { parseSql, type Parsed } from '../parser.ts';
+import { diffStates } from '../diff.ts';
+import { layoutTables } from '../layout.ts';
+import { cloneState, emptyState } from '../reducer.ts';
+import { splitStatements } from './splitStatements.ts';
 
 export interface StatementResult {
   label: string;
@@ -98,6 +98,12 @@ export class PgEngine {
    * private; this is the only sanctioned way to reach it from outside. */
   getDb(): PGlite | null {
     return this.db;
+  }
+
+  /** Last computed DBState, exposed read-only for GET /api/query/state
+   * (Issue #27) — reads only, executes nothing. */
+  getState(): DBState {
+    return this.lastState;
   }
 
   ensureReady(): Promise<void> {

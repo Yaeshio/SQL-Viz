@@ -8,6 +8,11 @@ const { buildApiPlugin } = vi.hoisted(() => ({
 }));
 vi.mock('../src/local/apiPlugin', () => ({ buildApiPlugin }));
 
+const { buildQueryApiPlugin } = vi.hoisted(() => ({
+  buildQueryApiPlugin: vi.fn((filePath: string) => ({ name: 'sql-viz-query-api', filePath })),
+}));
+vi.mock('../src/local/queryApiPlugin', () => ({ buildQueryApiPlugin }));
+
 const { exec } = vi.hoisted(() => ({ exec: vi.fn() }));
 vi.mock('node:child_process', () => ({ exec }));
 
@@ -18,6 +23,7 @@ const ORIGINAL_VITE_LOCAL_FILE = process.env.VITE_LOCAL_FILE;
 beforeEach(() => {
   createServer.mockReset();
   buildApiPlugin.mockClear();
+  buildQueryApiPlugin.mockClear();
   exec.mockReset();
   delete process.env.VITE_LOCAL_FILE;
 });
@@ -67,9 +73,13 @@ describe('spawnVite', () => {
 
     expect(process.env.VITE_LOCAL_FILE).toBe('true');
     expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql');
+    expect(buildQueryApiPlugin).toHaveBeenCalledWith('/abs/schema.sql');
     expect(createServer).toHaveBeenCalledWith(
       expect.objectContaining({
-        plugins: [{ name: 'sql-viz-local-api', filePath: '/abs/schema.sql' }],
+        plugins: [
+          { name: 'sql-viz-local-api', filePath: '/abs/schema.sql' },
+          { name: 'sql-viz-query-api', filePath: '/abs/schema.sql' },
+        ],
         server: expect.objectContaining({ host: '127.0.0.1', port: 5199, open: false }),
       }),
     );

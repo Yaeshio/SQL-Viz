@@ -196,6 +196,21 @@ GitHub認証層（`src/github/`, `useGitHubSettings.ts`, `GitHubSettingsPanel`�
 [docs/local-cli-sync-spec.md](docs/local-cli-sync-spec.md)、実装詳細は
 [docs/local-cli-sync-design.md](docs/local-cli-sync-design.md) を参照。
 
+Issue #27 で、`npm run sql-studio` のサーバープロセスに常駐する `PgEngine`
+（`src/local/queryApiPlugin.ts`）を、ブラウザを介さずエージェントが
+プログラム的に操作できる `POST /api/query`（`{sql, mode}` →
+`PgEngine.run()` の `RunResult` をほぼそのままJSON化）、
+`GET /api/query/state`（実行なしで現在の `DBState` を返す）、
+`GET /api/query/health`（コールドスタート完了判定）、
+`POST /api/query/reset`（起動時ブートストラップ直後の状態へ即座に戻す
+破壊的操作）として公開した。CLI版は `node scripts/query.mjs "<SQL>"`
+（stdin対応、`--mode=`指定、`RunResult` のJSONのみをstdoutに出力。
+`npm run query --`経由だとnpmのバナーがstdoutに混入するため、エージェント
+用途では`npm run --silent query --`かnode直接呼び出しを使うこと）。
+サーバー側セッションはブラウザ側の未保存キャンバス状態とは
+リアルタイム同期しない、完全に独立した`PgEngine`インスタンス。詳細仕様は
+[docs/agent-query-api-spec.md](docs/agent-query-api-spec.md) を参照。
+
 ## エージェント目視確認用ツール（Playwright）
 
 `tools/visual-check/`（Issue #13）は、エージェントが `npm run dev` の画面を

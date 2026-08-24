@@ -1,6 +1,11 @@
-import { Parser } from 'node-sql-parser';
+// Default import + runtime destructure (not a named import): node-sql-parser
+// is a plain CJS package with no "exports" map, and Node's native ESM loader
+// (used when scripts/openLocal.mjs runs outside Vite's bundler resolution)
+// can't always statically detect named CJS exports the way Vite/esbuild does.
+import pkg from 'node-sql-parser';
+const { Parser } = pkg;
 import type { Column, WhereClause } from './types';
-import { normalizeType } from './reducer';
+import { normalizeType } from './reducer.ts';
 
 const parser = new Parser();
 

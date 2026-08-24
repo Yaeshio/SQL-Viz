@@ -4,6 +4,7 @@ import { exec } from 'node:child_process';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildApiPlugin } from '../src/local/apiPlugin.ts';
+import { buildQueryApiPlugin } from '../src/local/queryApiPlugin.ts';
 
 const USAGE = 'Usage: npm run sql-studio -- <path/to/schema.sql>';
 const DEFAULT_URL = 'http://127.0.0.1:5173/';
@@ -34,7 +35,7 @@ export function openBrowser(url, platform = process.platform) {
 export async function spawnVite({ filePath, port }) {
   process.env.VITE_LOCAL_FILE = 'true';
   const server = await createServer({
-    plugins: [buildApiPlugin(filePath)],
+    plugins: [buildApiPlugin(filePath), buildQueryApiPlugin(filePath)],
     server: { host: '127.0.0.1', port, open: false },
   });
   await server.listen();
