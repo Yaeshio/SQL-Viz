@@ -208,6 +208,16 @@ Dockerイメージ上で実行することでホスト環境を汚染せずに�
 いる。使い方は [tools/visual-check/README.md](tools/visual-check/README.md)
 （もしくは `/visual-check` コマンド）を参照。
 
+## 受け入れテストハーネス（Docker+Playwright、自動判定）
+
+`tools/acceptance-check/`は、visual-check（目視確認専用）とは別に、実際の
+ファイルI/O・UI操作を自動でpass/fail判定する受け入れテストハーネスである。
+`npm test`・CIには組み込まれていない（visual-checkと同じ方針）。使い方は
+[tools/acceptance-check/README.md](tools/acceptance-check/README.md)を参照。
+各フェーズ（Phase A/B/C）が「完了」とみなされる具体的な受け入れ基準は
+[docs/alpha-phase-acceptance-criteria.md](docs/alpha-phase-acceptance-criteria.md)
+を参照。
+
 ## CI/CD
 
 `main` 向け PR と `main` への push を対象に、GitHub Actions
