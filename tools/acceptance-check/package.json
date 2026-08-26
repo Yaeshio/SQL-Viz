@@ -1,0 +1,10 @@
+{
+  "name": "sql-viz-acceptance-check",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Docker-isolated Playwright harness that asserts pass/fail automatically per alpha phase (not the visual-check manual-review tool). See README.md.",
+  "dependencies": {
+    "playwright": "1.61.1"
+  }
+}

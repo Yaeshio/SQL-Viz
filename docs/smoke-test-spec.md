@@ -89,6 +89,13 @@ E2E的にフロントエンドを直接操作するテストを実施すべき�
 将来、キャンバス上のインタラクション機能（ドラッグでのテーブル移動等）が追加され、
 UI 側のロジックが複雑化した場合は、この方針を再検討する。
 
+（補足: この見送りは`tests/`配下のvitestスイート・CIへのPlaywright組み込みに
+関する結論であり、それとは完全に独立した、Docker上でのみ動作する自動判定
+ハーネス`tools/acceptance-check/`を別途整備することとは矛盾しない。同ツールは
+`npm test`・CIには含まれず、上記の再検討トリガー——キャンバス上の
+インタラクション機能——に備える別枠の取り組みである。詳細は
+[tools/acceptance-check/README.md](../tools/acceptance-check/README.md)を参照。）
+
 ## 4. 未実装 SQL 文の分類
 
 現時点でサポートされているのは `CREATE TABLE` / `INSERT` / 単純な `SELECT`

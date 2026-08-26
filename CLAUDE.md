@@ -196,6 +196,35 @@ GitHub認証層（`src/github/`, `useGitHubSettings.ts`, `GitHubSettingsPanel`�
 [docs/local-cli-sync-spec.md](docs/local-cli-sync-spec.md)、実装詳細は
 [docs/local-cli-sync-design.md](docs/local-cli-sync-design.md) を参照。
 
+Issue #27 で、`npm run sql-studio` のサーバープロセスに常駐する `PgEngine`
+（`src/local/queryApiPlugin.ts`）を、ブラウザを介さずエージェントが
+プログラム的に操作できる `POST /api/query`（`{sql, mode}` →
+`PgEngine.run()` の `RunResult` をほぼそのままJSON化）、
+`GET /api/query/state`（実行なしで現在の `DBState` を返す）、
+`GET /api/query/health`（コールドスタート完了判定）、
+`POST /api/query/reset`（起動時ブートストラップ直後の状態へ即座に戻す
+破壊的操作）として公開した。CLI版は `node scripts/query.mjs "<SQL>"`
+（stdin対応、`--mode=`指定、`RunResult` のJSONのみをstdoutに出力。
+`npm run query --`経由だとnpmのバナーがstdoutに混入するため、エージェント
+用途では`npm run --silent query --`かnode直接呼び出しを使うこと）。
+サーバー側セッションはブラウザ側の未保存キャンバス状態とは
+リアルタイム同期しない、完全に独立した`PgEngine`インスタンス。詳細仕様は
+[docs/agent-query-api-spec.md](docs/agent-query-api-spec.md) を参照。
+
+Issue #33 で、Issue #27のクエリAPI/CLIとIssue #32の`verify`起動モードを
+組み合わせ、エージェントが改修提案ドキュメント（変更前後のスキーマ抜粋・
+検証に使ったクエリ例）を書き出すワークフローを整備した。新規APIエンド
+ポイントやUIは追加せず、`verify`モードで起動したsql-studioに対しエージェント
+がクエリAPI/CLIで変更を試行し、結果を自身のセッション内に保持したうえで
+ファイルシステムへ直接書き出す。書き出し先は固定せず、対象プロジェクト
+（`<path/to/schema.sql>`が属するリポジトリ）ごとにユーザーと相談して都度
+決める（旧Issue #24で見送った「アプリが自動で`query-examples.md`へ書き込む」
+方式とは異なる）。`scripts/openLocal.mjs`の起動時バナーには、SQL-Viz自身の
+ローカルチェックアウトがなくても参照できるよう、このワークフロー仕様書への
+GitHub URLが常に印字される。詳細は
+[docs/agent-proposal-workflow-spec.md](docs/agent-proposal-workflow-spec.md)
+を参照。
+
 ## エージェント目視確認用ツール（Playwright）
 
 `tools/visual-check/`（Issue #13）は、エージェントが `npm run dev` の画面を
@@ -207,6 +236,16 @@ GitHub認証層（`src/github/`, `useGitHubSettings.ts`, `GitHubSettingsPanel`�
 Dockerイメージ上で実行することでホスト環境を汚染せずに動かす方式を採用して
 いる。使い方は [tools/visual-check/README.md](tools/visual-check/README.md)
 （もしくは `/visual-check` コマンド）を参照。
+
+## 受け入れテストハーネス（Docker+Playwright、自動判定）
+
+`tools/acceptance-check/`は、visual-check（目視確認専用）とは別に、実際の
+ファイルI/O・UI操作を自動でpass/fail判定する受け入れテストハーネスである。
+`npm test`・CIには組み込まれていない（visual-checkと同じ方針）。使い方は
+[tools/acceptance-check/README.md](tools/acceptance-check/README.md)を参照。
+各フェーズ（Phase A/B/C）が「完了」とみなされる具体的な受け入れ基準は
+[docs/alpha-phase-acceptance-criteria.md](docs/alpha-phase-acceptance-criteria.md)
+を参照。
 
 ## CI/CD
 

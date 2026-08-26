@@ -149,6 +149,33 @@ Reload ボタンでファイルの内容を読み込み直せます。`git add`/
 [`docs/local-cli-sync-spec.md`](docs/local-cli-sync-spec.md) を参照して
 ください。Node 22.6 以上が必要です。
 
+既存スキーマを壊さず動作確認だけしたい場合は `--mode=verify` を付けて
+起動します。対象ファイルへの書き込みは（UI・API 双方で）一切行われません。
+Save を押すと、代わりに元ファイル名＋タイムスタンプの新規ファイルとして
+OS の一時ディレクトリ（既定: `os.tmpdir()/sql-viz-verify-saves/`。
+起動時にコンソールへ実際のパスが表示されます）へ書き出されます。保存先を
+明示的に指定したい場合は `--save-dir=<path>`（`--mode=verify` と併用時のみ
+有効）を追加してください。
+
+```bash
+npm run sql-studio -- schema/ddl.sql --mode=verify
+npm run sql-studio -- schema/ddl.sql --mode=verify --save-dir=/path/to/scratch
+```
+
+### エージェント向け情報
+
+`npm run sql-studio` の起動時（`author`/`verify` いずれのモードでも）、
+コンソールに改修提案ドキュメント（変更前後のスキーマ抜粋・検証に使った
+クエリ例をまとめた文書）の書き方をまとめたワークフロー仕様書へのURLが
+常に印字されます。このURLはGitHub上の恒久リンクであり、SQL-Viz自身の
+ローカルチェックアウトがなくても（将来のDocker配布経由での利用時等でも）
+参照できます。詳細は
+[`docs/agent-proposal-workflow-spec.md`](docs/agent-proposal-workflow-spec.md)
+を参照してください。エージェント向けSQL実行API/CLI（`GET`/`POST
+/api/query` 等）については
+[`docs/agent-query-api-spec.md`](docs/agent-query-api-spec.md) を参照して
+ください。
+
 ## コマンド
 
 | コマンド | 説明 |
@@ -156,6 +183,7 @@ Reload ボタンでファイルの内容を読み込み直せます。`git add`/
 | `npm install` | 依存関係のインストール |
 | `npm run dev` | Vite の開発サーバーを起動 |
 | `npm run sql-studio -- <path>` | ローカルCLIモードで起動（スキーマファイルの読み書きが可能） |
+| `npm run sql-studio -- <path> --mode=verify [--save-dir=<path>]` | 検証モードで起動（対象ファイルへは書き込まない。Save は一時ディレクトリへ別名保存） |
 | `npm run build` | 本番用ビルド（`vite build`） |
 | `npm run preview` | 本番ビルドのプレビュー |
 | `npm run lint` | ESLint 実行 |
@@ -206,6 +234,8 @@ docs/
   routing-decision.md           # ルーティング非対応の決定と理由
   local-cli-sync-spec.md        # ローカルCLI永続化の仕様（何を・なぜ）
   local-cli-sync-design.md      # ローカルCLI永続化の実装詳細
+  agent-query-api-spec.md       # エージェント向けSQL実行API/CLIの仕様
+  agent-proposal-workflow-spec.md # 改修提案ドキュメント作成ワークフロー仕様
 tests/
   *.test.ts    # Vitest ユニットテスト
 ```

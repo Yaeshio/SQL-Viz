@@ -1,0 +1,139 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import type { ViteDevServer } from 'vite';
+import { spawnVite } from '../scripts/openLocal.mjs';
+
+const execFileAsync = promisify(execFile);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// Real end-to-end round trip for Issue #27's HTTP API + CLI (as pre-decided
+// in docs/alpha-phase-acceptance-criteria.md — this issue has no browser
+// component, so its acceptance test belongs here, not in
+// tools/acceptance-check). Boots a genuine dev server (same spawnVite()
+// tools/acceptance-check/orchestrate-phase-a.mjs already uses this way)
+// against a throwaway temp directory, and spawns scripts/query.mjs as a real
+// child process against it.
+
+async function waitForHealthy(url: string, timeoutMs = 15000): Promise<void> {
+  const start = Date.now();
+  for (;;) {
+    try {
+      const res = await fetch(`${url}api/query/health`);
+      if (res.ok) {
+        const { ready } = await res.json();
+        if (ready) return;
+      }
+    } catch {
+      // server not accepting connections yet
+    }
+    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${url}api/query/health`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+interface CliResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+async function runCli(args: string[]): Promise<CliResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync('node', ['scripts/query.mjs', ...args], { cwd: repoRoot });
+    return { code: 0, stdout, stderr };
+  } catch (err) {
+    const e = err as { code?: number; stdout?: string; stderr?: string };
+    return { code: e.code ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+  }
+}
+
+let server: ViteDevServer | undefined;
+let tmpDir: string | undefined;
+
+afterEach(async () => {
+  if (server) {
+    await server.close();
+    server = undefined;
+  }
+  if (tmpDir) {
+    await rm(tmpDir, { recursive: true, force: true });
+    tmpDir = undefined;
+  }
+});
+
+describe('agent query API — real server + real CLI subprocess', () => {
+  it(
+    'QUERY-INT-01: HTTP API — health/query/state/resetの実往復',
+    async () => {
+      tmpDir = await mkdtemp(path.join(tmpdir(), 'sql-viz-query-api-'));
+      const schemaPath = path.join(tmpDir, 'schema.sql'); // deliberately not pre-created
+
+      server = await spawnVite({ filePath: schemaPath, port: undefined });
+      const url = server.resolvedUrls!.local[0];
+      await waitForHealthy(url);
+
+      const createRes = await fetch(`${url}api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: 'CREATE TABLE users (id INT, name VARCHAR(50))', mode: 'design' }),
+      });
+      expect(createRes.status).toBe(200);
+      const createBody = await createRes.json();
+      expect(createBody.results[0].error).toBeUndefined();
+
+      const stateRes = await fetch(`${url}api/query/state`);
+      const { state } = await stateRes.json();
+      expect(state.order).toEqual(['users']);
+
+      const resetRes = await fetch(`${url}api/query/reset`, { method: 'POST' });
+      expect(resetRes.status).toBe(200);
+      expect(await resetRes.json()).toEqual({ ok: true, error: null });
+
+      const afterResetState = await (await fetch(`${url}api/query/state`)).json();
+      expect(afterResetState.state.order).toEqual([]); // schema file was empty/absent
+    },
+    60000,
+  );
+
+  it(
+    'QUERY-INT-02: CLI — npm run query 相当のプロセスがJSONのみをstdoutに出しexit 0で終了する',
+    async () => {
+      tmpDir = await mkdtemp(path.join(tmpdir(), 'sql-viz-query-api-'));
+      const schemaPath = path.join(tmpDir, 'schema.sql');
+
+      server = await spawnVite({ filePath: schemaPath, port: undefined });
+      const url = server.resolvedUrls!.local[0];
+      await waitForHealthy(url);
+
+      const create = await runCli(['CREATE TABLE users (id INT)', `--url=${url.replace(/\/$/, '')}`]);
+      expect(create.code).toBe(0);
+      expect(create.stdout.trim()).not.toBe('');
+      const parsed = JSON.parse(create.stdout); // must be JSON.parse-able as-is
+      expect(parsed.results[0].error).toBeUndefined();
+
+      // A statement disallowed in the session's current mode: the CLI still
+      // reports it as exit code 1 (SQL execution error), and stdout is still
+      // pure JSON.
+      const modeViolation = await runCli(['SELECT * FROM users', `--url=${url.replace(/\/$/, '')}`, '--mode=design']);
+      expect(modeViolation.code).toBe(1);
+      const violationBody = JSON.parse(modeViolation.stdout);
+      expect(violationBody.parseError).toContain('is not allowed in design mode');
+    },
+    60000,
+  );
+
+  it(
+    'QUERY-INT-03: CLI — サーバー未起動/接続不可 → exit code 2',
+    async () => {
+      const result = await runCli(['SELECT 1', '--url=http://127.0.0.1:1']);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('Could not reach');
+    },
+    15000,
+  );
+});
