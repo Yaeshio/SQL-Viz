@@ -211,6 +211,20 @@ Issue #27 で、`npm run sql-studio` のサーバープロセスに常駐する 
 リアルタイム同期しない、完全に独立した`PgEngine`インスタンス。詳細仕様は
 [docs/agent-query-api-spec.md](docs/agent-query-api-spec.md) を参照。
 
+Issue #33 で、Issue #27のクエリAPI/CLIとIssue #32の`verify`起動モードを
+組み合わせ、エージェントが改修提案ドキュメント（変更前後のスキーマ抜粋・
+検証に使ったクエリ例）を書き出すワークフローを整備した。新規APIエンド
+ポイントやUIは追加せず、`verify`モードで起動したsql-studioに対しエージェント
+がクエリAPI/CLIで変更を試行し、結果を自身のセッション内に保持したうえで
+ファイルシステムへ直接書き出す。書き出し先は固定せず、対象プロジェクト
+（`<path/to/schema.sql>`が属するリポジトリ）ごとにユーザーと相談して都度
+決める（旧Issue #24で見送った「アプリが自動で`query-examples.md`へ書き込む」
+方式とは異なる）。`scripts/openLocal.mjs`の起動時バナーには、SQL-Viz自身の
+ローカルチェックアウトがなくても参照できるよう、このワークフロー仕様書への
+GitHub URLが常に印字される。詳細は
+[docs/agent-proposal-workflow-spec.md](docs/agent-proposal-workflow-spec.md)
+を参照。
+
 ## エージェント目視確認用ツール（Playwright）
 
 `tools/visual-check/`（Issue #13）は、エージェントが `npm run dev` の画面を

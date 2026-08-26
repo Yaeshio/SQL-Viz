@@ -144,6 +144,10 @@ Contents API へ直接 push することでスキーマを永続化していた�
 - `git add`/`commit`/`push` の自動化。
 - クエリ例（`query-examples.md`）の永続化・昇格フロー（旧Issue #24で検討
   されたが、クエリ単体を永続化する必要性自体が低いと判断しクローズ済み）。
+  なお、アプリ機能としてではなくエージェントの裁量による改修提案ドキュメント
+  の書き出しについては、Issue #33 /
+  [docs/agent-proposal-workflow-spec.md](./agent-proposal-workflow-spec.md)
+  を参照（本節の対象外規定とは別の経路であり矛盾しない）。
 - テーブル間のリレーション（外部キー）のモデル化・DDL出力（本機能導入前
   からのスコープ外）。
 

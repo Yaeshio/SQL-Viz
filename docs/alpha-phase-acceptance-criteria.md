@@ -20,7 +20,10 @@ SQL-Vizのα版検証は「フェーズA: ワークフロー体験 → フェー
   前方互換性メモ: `tools/acceptance-check/orchestrate-phase-a.mjs` の `spawnVite()` 直接
   呼び出し部分は、#31実装後に `docker run ... sql-studio /workspace/schema.sql` への
   差し替えが可能なよう、シナリオ側（`run.mjs`/`scenarios/`）は「到達可能なURLとbind mount
-  されたパス」だけに依存する設計にしてある。
+  されたパス」だけに依存する設計にしてある。また、将来Dockerfile/entrypointを実装する
+  際は、`scripts/openLocal.mjs`の起動時バナーが印字する`docs/agent-proposal-workflow-spec.md`
+  （#33）へのURLポインタを維持すること（SQL-Viz自身のローカルチェックアウトを持たない
+  Docker利用時でも、エージェントがワークフロー文書に到達できるようにするため）。
 - **#27（エージェント向けSQL実行CLI/API）** — issueコメントに詳細なitemized AC checklistが
   既にある（`POST /api/query`、`GET /api/query/state`・`/health`、`POST /api/query/reset`、
   `npm run query --`のJSON専用stdout・exit code設計等）。このAPI/CLIはブラウザを一切
@@ -37,10 +40,14 @@ SQL-Vizのα版検証は「フェーズA: ワークフロー体験 → フェー
   (a) verifyモードでも既存スキーマがサイレント自動ロードされること、(b) Save が
   対象ファイルを変更せず`saveDir`へ別名保存されること、(c) `POST /api/schema`への
   直接アクセスが403で拒否され対象ファイルが変更されないこと、を実ファイルI/Oで検証する。
-- **#33（改修提案・クエリ例ドキュメントのエージェント執筆ワークフロー）** — 新規APIも
-  新規UIも追加しない方針の文書/ワークフロー整備issueのため、自動テストではなく
-  ドキュメントレビュー／手動ワークフロー確認で検証する対象になる見込み。
-  未決事項（ドキュメントの配置場所・テンプレート）が解消されるまで具体化しない。
+- **#33（改修提案・クエリ例ドキュメントのエージェント執筆ワークフロー）** — 実装済み。
+  `docs/agent-proposal-workflow-spec.md`にワークフロー・テンプレートを定義した。
+  書き出し先の配置場所は、SQL-Viz側に新規CLIフラグ・GUI設定を追加せず、対象
+  プロジェクト（起動時に指定するスキーマファイルが属するリポジトリ）側で
+  エージェントとユーザーが都度決める運用とした（要望が増えれば動的設定機能を
+  別Issueとして検討する）。新規APIも新規UIも追加しない方針のため、自動テストは
+  作らず、ドキュメントレビュー／手動ワークフロー確認（本仕様書の手順を実際に
+  辿れるか）で検証する。
 
 **今すぐ動く実証**: 上記のうち#31/#33は未実装だが、#27・#32は実装済みであり、その土台である
 （クローズ済みの）#26のローカルファイル同期機能とあわせて、`tools/acceptance-check`の

@@ -162,6 +162,20 @@ npm run sql-studio -- schema/ddl.sql --mode=verify
 npm run sql-studio -- schema/ddl.sql --mode=verify --save-dir=/path/to/scratch
 ```
 
+### エージェント向け情報
+
+`npm run sql-studio` の起動時（`author`/`verify` いずれのモードでも）、
+コンソールに改修提案ドキュメント（変更前後のスキーマ抜粋・検証に使った
+クエリ例をまとめた文書）の書き方をまとめたワークフロー仕様書へのURLが
+常に印字されます。このURLはGitHub上の恒久リンクであり、SQL-Viz自身の
+ローカルチェックアウトがなくても（将来のDocker配布経由での利用時等でも）
+参照できます。詳細は
+[`docs/agent-proposal-workflow-spec.md`](docs/agent-proposal-workflow-spec.md)
+を参照してください。エージェント向けSQL実行API/CLI（`GET`/`POST
+/api/query` 等）については
+[`docs/agent-query-api-spec.md`](docs/agent-query-api-spec.md) を参照して
+ください。
+
 ## コマンド
 
 | コマンド | 説明 |
@@ -220,6 +234,8 @@ docs/
   routing-decision.md           # ルーティング非対応の決定と理由
   local-cli-sync-spec.md        # ローカルCLI永続化の仕様（何を・なぜ）
   local-cli-sync-design.md      # ローカルCLI永続化の実装詳細
+  agent-query-api-spec.md       # エージェント向けSQL実行API/CLIの仕様
+  agent-proposal-workflow-spec.md # 改修提案ドキュメント作成ワークフロー仕様
 tests/
   *.test.ts    # Vitest ユニットテスト
 ```

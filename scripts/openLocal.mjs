@@ -81,6 +81,9 @@ export async function main(argv = process.argv.slice(2)) {
   const resolvedSaveDir = mode === 'verify' ? (saveDir ?? DEFAULT_VERIFY_SAVE_DIR) : undefined;
   const server = await spawnVite({ filePath, mode, saveDir: resolvedSaveDir });
   server.printUrls();
+  console.log(
+    '改修提案ドキュメントの書き方: https://github.com/Yaeshio/SQL-Viz/blob/main/docs/agent-proposal-workflow-spec.md',
+  );
   if (resolvedSaveDir) {
     console.log(`検証モードで起動しました。別名保存の保存先: ${resolvedSaveDir}`);
   }
