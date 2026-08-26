@@ -48,7 +48,14 @@ node tools/acceptance-check/orchestrate-phase-a.mjs
    再度 `spawnVite()` を呼び出す。
 5. `sql-viz-acceptance-check` コンテナ（`--phase=A-restart`）を実行し、再起動時の
    サイレント自動ロードを検証する。
-6. devサーバーを停止し、一時ディレクトリを削除。
+6. devサーバーを停止し、同じ（restartフェーズが読み込んだ）スキーマファイルに対して、
+   `mode: 'verify'` かつ一時ディレクトリ配下の `verify-saves/` を `saveDir` とする
+   **新しいプロセス**として再度 `spawnVite()` を呼び出す（Issue #32）。
+7. `sql-viz-acceptance-check` コンテナ（`--phase=A-verify`、`--save-dir=/workspace/
+   verify-saves`）を実行し、検証モードでの読み込みは通常通り行われること・Save が
+   対象ファイルを変更せず `saveDir` へ別名保存されること・`POST /api/schema` への
+   直接アクセスが403で拒否されることを検証する。
+8. devサーバーを停止し、一時ディレクトリを削除。
 
 最終的に `{"phase": "A", "scenarios": [...], "ok": true}` 形式のJSONを標準出力に出し、
 `ok` が `false` の場合は非ゼロで終了する。
@@ -59,9 +66,10 @@ node tools/acceptance-check/orchestrate-phase-a.mjs
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` |
+| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` |
 | `--url` | なし（必須） | 対象のsql-studio dev serverのURL |
 | `--schema` | なし（必須） | コンテナ内から見えるスキーマファイルのパス（bind mount先、例: `/workspace/schema.sql`） |
+| `--save-dir` | なし | `A-verify` 専用。検証モードの別名保存先（bind mount先、例: `/workspace/verify-saves`） |
 | `--out` | なし | JSON結果を標準出力に加えてファイルにも書き出す場合のパス |
 | `--timeout` | `15000` | 各操作のタイムアウト（ミリ秒） |
 

@@ -1,8 +1,12 @@
-import { Loader2, RefreshCw, Save, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCw, Save, ShieldAlert, XCircle } from 'lucide-react';
 import type { SyncStatus } from '../../hooks/useLocalSync';
 
 export interface LocalSyncControlsProps {
   isLocal: boolean;
+  /** true when sql-studio was launched with --mode=verify: Save no longer
+   * overwrites the target file, it exports to a separate server-chosen path
+   * (see App.tsx's handleSave / localSync.verifySave). */
+  verifyMode: boolean;
   saveStatus: SyncStatus;
   reloadStatus: SyncStatus;
   saveDisabled: boolean;
@@ -14,6 +18,7 @@ export interface LocalSyncControlsProps {
  * local CLI mode, so the hosted/Vercel build never shows any of this. */
 export default function LocalSyncControls({
   isLocal,
+  verifyMode,
   saveStatus,
   reloadStatus,
   saveDisabled,
@@ -22,8 +27,18 @@ export default function LocalSyncControls({
 }: LocalSyncControlsProps) {
   if (!isLocal) return null;
 
+  const saveLabel = verifyMode ? '一時ファイルへ保存（検証モード）' : 'ファイルへ保存';
+
   return (
     <div className="flex items-center gap-1.5">
+      {verifyMode && (
+        <span
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-700/60 bg-amber-950/40 text-[11px] text-amber-400"
+          title="対象スキーマファイルへは保存されません"
+        >
+          <ShieldAlert size={11} /> 検証モード
+        </span>
+      )}
       <button
         onClick={onReload}
         disabled={reloadStatus.kind === 'pending'}
@@ -37,13 +52,18 @@ export default function LocalSyncControls({
         onClick={onSave}
         disabled={saveDisabled || saveStatus.kind === 'pending'}
         data-testid="save-to-file-btn"
-        aria-label="ファイルへ保存"
-        title="ファイルへ保存"
+        aria-label={saveLabel}
+        title={saveLabel}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-700 hover:border-slate-500 hover:bg-slate-800 transition text-slate-300 text-xs disabled:opacity-40 disabled:hover:bg-transparent"
       >
         {saveStatus.kind === 'pending' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
         Save
       </button>
+      {saveStatus.kind === 'success' && saveStatus.path && (
+        <span className="flex items-center gap-1 text-[11px] text-emerald-400" role="status">
+          <CheckCircle2 size={12} /> 保存先: {saveStatus.path}
+        </span>
+      )}
       {saveStatus.kind === 'error' && (
         <span className="flex items-center gap-1 text-[11px] text-rose-400" role="alert">
           <XCircle size={12} /> {saveStatus.message}

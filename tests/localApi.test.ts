@@ -9,13 +9,14 @@ const { readFile, writeFile, mkdir } = vi.hoisted(() => ({
 
 vi.mock('node:fs/promises', () => ({ readFile, writeFile, mkdir }));
 
-import { buildApiPlugin } from '../src/local/apiPlugin';
+import { buildApiPlugin, buildVerifySaveFilename } from '../src/local/apiPlugin';
+import type { ApiPluginOptions } from '../src/local/apiPlugin';
 
-function makeReq(method: string, body?: string): Connect.IncomingMessage {
+function makeReq(method: string, body?: string, url = '/'): Connect.IncomingMessage {
   async function* chunks() {
     if (body) yield Buffer.from(body, 'utf-8');
   }
-  return { method, [Symbol.asyncIterator]: chunks } as unknown as Connect.IncomingMessage;
+  return { method, url, [Symbol.asyncIterator]: chunks } as unknown as Connect.IncomingMessage;
 }
 
 interface FakeRes {
@@ -40,9 +41,9 @@ function makeRes(): FakeRes {
   };
 }
 
-function getHandler(filePath: string): Connect.NextHandleFunction {
+function getHandler(filePath: string, options?: ApiPluginOptions): Connect.NextHandleFunction {
   const use = vi.fn();
-  const plugin = buildApiPlugin(filePath);
+  const plugin = buildApiPlugin(filePath, options);
   // configureServer is declared as an ObjectHook<ServerHook> in Vite's Plugin
   // type, but buildApiPlugin always assigns it a plain function. A fake
   // server exposing only `middlewares.use` is all that function needs.
@@ -156,5 +157,99 @@ describe('buildApiPlugin', () => {
     await handler(makeReq('DELETE'), res as never, next);
 
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('readOnly: true のとき POST /api/schema は 403 を返し、fsへは一切書き込まない', async () => {
+    const handler = getHandler('/abs/schema/ddl.sql', { readOnly: true });
+    const res = makeRes();
+
+    await handler(makeReq('POST', JSON.stringify({ content: 'CREATE TABLE t (id INT);' })), res as never, vi.fn());
+
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body)).toEqual({ ok: false, error: '検証モードのため保存できません' });
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  it('readOnly: true でも GET /api/schema は従来通り動作する', async () => {
+    readFile.mockResolvedValueOnce('CREATE TABLE users (id INT);');
+    const handler = getHandler('/abs/schema/ddl.sql', { readOnly: true });
+    const res = makeRes();
+
+    await handler(makeReq('GET'), res as never, vi.fn());
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ content: 'CREATE TABLE users (id INT);' });
+  });
+
+  it('POST /api/schema/verify-save → saveDir配下へ生成ファイル名で書き込み、{ ok: true, path } を返す', async () => {
+    mkdir.mockResolvedValueOnce(undefined);
+    writeFile.mockResolvedValueOnce(undefined);
+    const handler = getHandler('/abs/schema/ddl.sql', { saveDir: '/abs/tmp/verify-saves' });
+    const res = makeRes();
+
+    await handler(
+      makeReq('POST', JSON.stringify({ content: 'CREATE TABLE t (id INT);' }), '/verify-save'),
+      res as never,
+      vi.fn(),
+    );
+
+    expect(mkdir).toHaveBeenCalledWith('/abs/tmp/verify-saves', { recursive: true });
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const [writtenPath, writtenContent, writtenEncoding] = writeFile.mock.calls[0];
+    expect(writtenPath).toMatch(/^\/abs\/tmp\/verify-saves\/ddl\..+\.sql$/);
+    expect(writtenContent).toBe('CREATE TABLE t (id INT);');
+    expect(writtenEncoding).toBe('utf-8');
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(res.body) as { ok: boolean; path: string };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.path).toBe(writtenPath);
+  });
+
+  it('POST /api/schema/verify-save は readOnly: false でも動作する（対象ファイルへの書き込みではないため）', async () => {
+    mkdir.mockResolvedValueOnce(undefined);
+    writeFile.mockResolvedValueOnce(undefined);
+    const handler = getHandler('/abs/schema/ddl.sql', { readOnly: false, saveDir: '/abs/tmp/verify-saves' });
+    const res = makeRes();
+
+    await handler(makeReq('POST', JSON.stringify({ content: 'x' }), '/verify-save'), res as never, vi.fn());
+
+    expect(res.statusCode).toBe(200);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /api/schema/verify-save — contentフィールドなし → status 400', async () => {
+    const handler = getHandler('/abs/schema/ddl.sql', { saveDir: '/abs/tmp/verify-saves' });
+    const res = makeRes();
+
+    await handler(makeReq('POST', JSON.stringify({}), '/verify-save'), res as never, vi.fn());
+
+    expect(res.statusCode).toBe(400);
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('saveDir未指定時のPOST /api/schema/verify-saveは対象ファイルと同じディレクトリへ書き込む', async () => {
+    mkdir.mockResolvedValueOnce(undefined);
+    writeFile.mockResolvedValueOnce(undefined);
+    const handler = getHandler('/abs/schema/ddl.sql');
+    const res = makeRes();
+
+    await handler(makeReq('POST', JSON.stringify({ content: 'x' }), '/verify-save'), res as never, vi.fn());
+
+    expect(mkdir).toHaveBeenCalledWith('/abs/schema', { recursive: true });
+    const [writtenPath] = writeFile.mock.calls[0];
+    expect(writtenPath).toMatch(/^\/abs\/schema\/ddl\..+\.sql$/);
+  });
+});
+
+describe('buildVerifySaveFilename', () => {
+  it('元ファイル名の拡張子の直前にタイムスタンプを挿入する（":" は "-" に置換）', () => {
+    const now = new Date('2026-08-26T12:34:56.789Z');
+    expect(buildVerifySaveFilename('/abs/schema/ddl.sql', now)).toBe('ddl.2026-08-26T12-34-56.sql');
+  });
+
+  it('拡張子のないファイル名でも動作する', () => {
+    const now = new Date('2026-01-02T03:04:05.000Z');
+    expect(buildVerifySaveFilename('/abs/schema/ddl', now)).toBe('ddl.2026-01-02T03-04-05');
   });
 });

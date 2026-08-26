@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchSchema, isLocalMode, saveSchema } from '../src/local/localSync';
+import { fetchSchema, getStartupMode, isLocalMode, saveSchema, saveSchemaAs } from '../src/local/localSync';
 
 function jsonResponse(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, statusText: '', json: async () => body } as Response;
@@ -22,6 +22,24 @@ describe('isLocalMode', () => {
 
     vi.stubEnv('VITE_LOCAL_FILE', undefined);
     expect(isLocalMode()).toBe(false);
+  });
+});
+
+describe('getStartupMode', () => {
+  it('LOCAL-MODE-07: VITE_STARTUP_MODEが"verify"のときverifyを返す', () => {
+    vi.stubEnv('VITE_STARTUP_MODE', 'verify');
+    expect(getStartupMode()).toBe('verify');
+  });
+
+  it('LOCAL-MODE-08: 未設定または"verify"以外のときauthorを返す', () => {
+    vi.stubEnv('VITE_STARTUP_MODE', undefined);
+    expect(getStartupMode()).toBe('author');
+
+    vi.stubEnv('VITE_STARTUP_MODE', 'author');
+    expect(getStartupMode()).toBe('author');
+
+    vi.stubEnv('VITE_STARTUP_MODE', 'bogus');
+    expect(getStartupMode()).toBe('author');
   });
 });
 
@@ -62,5 +80,28 @@ describe('saveSchema', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(saveSchema('CREATE TABLE t (id INT);')).rejects.toThrow('disk full');
+  });
+});
+
+describe('saveSchemaAs', () => {
+  it('LOCAL-MODE-09: POST /api/schema/verify-save を送信し、成功時に { path } で解決する', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { ok: true, path: '/tmp/sql-viz-verify-saves/ddl.x.sql' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(saveSchemaAs('CREATE TABLE t (id INT);')).resolves.toEqual({
+      path: '/tmp/sql-viz-verify-saves/ddl.x.sql',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/schema/verify-save');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ content: 'CREATE TABLE t (id INT);' });
+  });
+
+  it('LOCAL-MODE-10: not ok時にサーバエラーメッセージをthrowする', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(403, { ok: false, error: '検証モードのため保存できません' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(saveSchemaAs('CREATE TABLE t (id INT);')).rejects.toThrow('検証モードのため保存できません');
   });
 });

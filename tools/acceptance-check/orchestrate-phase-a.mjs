@@ -3,10 +3,11 @@
 // (docs/alpha-phase-acceptance-criteria.md). Plain Node, no dependency on
 // this tool's own node_modules: it imports scripts/openLocal.mjs's
 // spawnVite() directly (the same code path `npm run sql-studio` uses) rather
-// than spawning a subprocess and scraping stdout, boots two real Vite dev
-// servers in-process against a throwaway temp directory, and runs the
-// scenario container (built from ./Dockerfile) against each one.
-import { mkdtemp, rm } from 'node:fs/promises';
+// than spawning a subprocess and scraping stdout, boots three real Vite dev
+// servers in-process (author-mode initial, author-mode restart, verify-mode)
+// against a throwaway temp directory, and runs the scenario container
+// (built from ./Dockerfile) against each one.
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -19,7 +20,7 @@ const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const IMAGE = 'sql-viz-acceptance-check';
 
-async function runDockerPhase(phase, port, tmpDir) {
+async function runDockerPhase(phase, port, tmpDir, extraArgs = []) {
   const args = [
     'run',
     '--rm',
@@ -29,6 +30,7 @@ async function runDockerPhase(phase, port, tmpDir) {
     `--phase=${phase}`,
     `--url=http://host.docker.internal:${port}`,
     '--schema=/workspace/schema.sql',
+    ...extraArgs,
   ];
   try {
     const { stdout } = await execFileAsync('docker', args, { cwd: repoRoot });
@@ -72,6 +74,19 @@ async function main() {
     const restartPort = new URL(server.resolvedUrls.local[0]).port;
     const restartReport = await runDockerPhase('A-restart', restartPort, tmpDir);
     allScenarios.push(...restartReport.scenarios);
+    await server.close();
+    server = undefined;
+
+    // Issue #32: a third fresh process, launched in verify mode against the
+    // same schemaPath (now populated by the scenarios above). saveDir lives
+    // under the same mounted tmpDir so the container-side scenario can read
+    // back what got exported without needing its own volume.
+    const hostSaveDir = path.join(tmpDir, 'verify-saves');
+    await mkdir(hostSaveDir, { recursive: true });
+    server = await spawnVite({ filePath: schemaPath, mode: 'verify', saveDir: hostSaveDir });
+    const verifyPort = new URL(server.resolvedUrls.local[0]).port;
+    const verifyReport = await runDockerPhase('A-verify', verifyPort, tmpDir, ['--save-dir=/workspace/verify-saves']);
+    allScenarios.push(...verifyReport.scenarios);
   } finally {
     if (server) await server.close();
     await rm(tmpDir, { recursive: true, force: true });

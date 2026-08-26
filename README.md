@@ -149,6 +149,19 @@ Reload ボタンでファイルの内容を読み込み直せます。`git add`/
 [`docs/local-cli-sync-spec.md`](docs/local-cli-sync-spec.md) を参照して
 ください。Node 22.6 以上が必要です。
 
+既存スキーマを壊さず動作確認だけしたい場合は `--mode=verify` を付けて
+起動します。対象ファイルへの書き込みは（UI・API 双方で）一切行われません。
+Save を押すと、代わりに元ファイル名＋タイムスタンプの新規ファイルとして
+OS の一時ディレクトリ（既定: `os.tmpdir()/sql-viz-verify-saves/`。
+起動時にコンソールへ実際のパスが表示されます）へ書き出されます。保存先を
+明示的に指定したい場合は `--save-dir=<path>`（`--mode=verify` と併用時のみ
+有効）を追加してください。
+
+```bash
+npm run sql-studio -- schema/ddl.sql --mode=verify
+npm run sql-studio -- schema/ddl.sql --mode=verify --save-dir=/path/to/scratch
+```
+
 ## コマンド
 
 | コマンド | 説明 |
@@ -156,6 +169,7 @@ Reload ボタンでファイルの内容を読み込み直せます。`git add`/
 | `npm install` | 依存関係のインストール |
 | `npm run dev` | Vite の開発サーバーを起動 |
 | `npm run sql-studio -- <path>` | ローカルCLIモードで起動（スキーマファイルの読み書きが可能） |
+| `npm run sql-studio -- <path> --mode=verify [--save-dir=<path>]` | 検証モードで起動（対象ファイルへは書き込まない。Save は一時ディレクトリへ別名保存） |
 | `npm run build` | 本番用ビルド（`vite build`） |
 | `npm run preview` | 本番ビルドのプレビュー |
 | `npm run lint` | ESLint 実行 |

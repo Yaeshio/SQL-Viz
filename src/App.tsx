@@ -66,11 +66,17 @@ export default function App() {
     setMode('design');
   };
 
+  const verifyMode = localSync.startupMode === 'verify';
+
   const handleSave = async () => {
     const db = getDb();
     if (!db) return;
     const ddl = await generateDdl(db, state.order);
-    await localSync.save(ddl);
+    if (verifyMode) {
+      await localSync.verifySave(ddl);
+    } else {
+      await localSync.save(ddl);
+    }
   };
 
   const handleReload = async () => {
@@ -89,6 +95,7 @@ export default function App() {
         onReset={handleReset}
         localSync={{
           isLocal: localSync.isLocal,
+          verifyMode,
           saveStatus: localSync.saveStatus,
           reloadStatus: localSync.reloadStatus,
           saveDisabled: mode !== 'design' || state.order.length === 0,

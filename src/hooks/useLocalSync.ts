@@ -1,13 +1,21 @@
 import { useCallback, useState } from 'react';
-import { fetchSchema, isLocalMode, saveSchema } from '../local/localSync';
+import { fetchSchema, getStartupMode, isLocalMode, saveSchema, saveSchemaAs, type StartupMode } from '../local/localSync';
 
-export type SyncStatus = { kind: 'idle' } | { kind: 'pending' } | { kind: 'success' } | { kind: 'error'; message: string };
+export type SyncStatus =
+  | { kind: 'idle' }
+  | { kind: 'pending' }
+  | { kind: 'success'; path?: string }
+  | { kind: 'error'; message: string };
 
 export interface UseLocalSyncResult {
   isLocal: boolean;
+  startupMode: StartupMode;
   saveStatus: SyncStatus;
   reloadStatus: SyncStatus;
   save: (ddl: string) => Promise<void>;
+  /** verify-mode counterpart to save(): exports to a server-chosen path
+   * instead of overwriting the target file. */
+  verifySave: (ddl: string) => Promise<void>;
   /** Returns the fetched DDL on success (caller feeds it to run()), or null
    * on failure — reloadStatus carries the error for display. */
   reload: () => Promise<string | null>;
@@ -35,6 +43,16 @@ export function useLocalSync(): UseLocalSyncResult {
     }
   }, []);
 
+  const verifySave = useCallback(async (ddl: string) => {
+    setSaveStatus({ kind: 'pending' });
+    try {
+      const { path } = await saveSchemaAs(ddl);
+      setSaveStatus({ kind: 'success', path });
+    } catch (e) {
+      setSaveStatus({ kind: 'error', message: errorMessage(e) });
+    }
+  }, []);
+
   const reload = useCallback(async (): Promise<string | null> => {
     setReloadStatus({ kind: 'pending' });
     try {
@@ -47,5 +65,5 @@ export function useLocalSync(): UseLocalSyncResult {
     }
   }, []);
 
-  return { isLocal: isLocalMode(), saveStatus, reloadStatus, save, reload };
+  return { isLocal: isLocalMode(), startupMode: getStartupMode(), saveStatus, reloadStatus, save, verifySave, reload };
 }

@@ -9,8 +9,8 @@
 | ファイル | 役割 |
 |---|---|
 | `scripts/openLocal.mjs` | `npm run sql-studio` のCLIエントリポイント |
-| `src/local/apiPlugin.ts` | Vite dev server プラグイン。`GET`/`POST /api/schema` |
-| `src/local/localSync.ts` | ブラウザ側の薄いfetchラッパー（`isLocalMode`/`fetchSchema`/`saveSchema`） |
+| `src/local/apiPlugin.ts` | Vite dev server プラグイン。`GET`/`POST /api/schema`、`POST /api/schema/verify-save`（Issue #32） |
+| `src/local/localSync.ts` | ブラウザ側の薄いfetchラッパー（`isLocalMode`/`getStartupMode`/`fetchSchema`/`saveSchema`/`saveSchemaAs`） |
 | `src/hooks/useLocalSync.ts` | `localSync.ts` を状態管理でラップするReactフック |
 | `src/components/local/LocalSyncControls.tsx` | ヘッダーのSave/Reloadボタン（旧GitHub設定ギアの置き換え） |
 
@@ -39,12 +39,22 @@ inline config をマージするため、`react()` 等の既存プラグイン�
   `cmd /c start`, その他: `xdg-open`）を `node:child_process.exec` で
   呼び出す。新規npm依存は追加しない。失敗してもサーバー起動自体はブロック
   せず、URLをコンソールに表示して手動オープンを促す。
-- `spawnVite({ filePath, port })`: `process.env.VITE_LOCAL_FILE = 'true'`
-  をセットしてから `createServer()` を呼び、`localApiPlugin(filePath)` を
+- `parseArgs(argv)`（Issue #32で追加。`scripts/query.mjs` の同名関数と
+  対称的なパターン）: `--mode=`/`--save-dir=` をプレフィックス一致で拾い、
+  残りは positional（先頭がDDLファイルパス）として返す。`mode` は未指定時
+  `'author'`。
+- `spawnVite({ filePath, port, mode = 'author', saveDir })`:
+  `process.env.VITE_LOCAL_FILE = 'true'` と `process.env.VITE_STARTUP_MODE
+  = mode` をセットしてから `createServer()` を呼び、
+  `buildApiPlugin(filePath, { readOnly: mode === 'verify', saveDir })` を
   注入し、`server.host: '127.0.0.1'` に固定して `listen()` する。
-- `main(argv)`: 引数なし（ファイルパス未指定）の場合は usage を stderr へ
-  出力して exit code 1 で終了する（デフォルトパスへのフォールバックは
-  行わない——「引数を渡し忘れた」ことに気づけるようにするため）。
+- `main(argv)`: `parseArgs()` の結果を検証し、ファイルパス未指定・`mode` が
+  `author`/`verify` 以外・`--save-dir` が `--mode=verify` なしで指定
+  のいずれかに該当する場合は usage を stderr へ出力して exit code 1 で
+  終了する（デフォルトパスへのフォールバックは行わない——「引数を渡し
+  忘れた」ことに気づけるようにするため）。`mode === 'verify'` のとき、
+  `saveDir` 未指定なら `path.join(os.tmpdir(), 'sql-viz-verify-saves')`
+  を既定値として解決し、起動後にコンソールへ表示する。
 
 ### Node の TypeScript サポートへの依存
 
@@ -64,10 +74,22 @@ Vitest 経由のテスト（`tests/openLocal.test.ts` 等）はesbuildベース�
 ## 3. `src/local/apiPlugin.ts`
 
 Vite の `configureServer` フック（Connect ミドルウェア）として実装。
-`buildApiPlugin(filePath: string): Plugin` が `filePath` を**生成時に一度
-だけ**受け取り、以降のリクエストからは一切パスを受け付けない
-（spec 3節のセキュリティ要件）。`/api/schema` 以外のパス・GET/POST 以外の
-メソッドは `next()` で後続のVite内部ルーティングに委譲する。
+`buildApiPlugin(filePath: string, options?: { readOnly?: boolean; saveDir?:
+string }): Plugin` が `filePath`・`readOnly`・`saveDir` を**生成時に一度
+だけ**受け取り、以降のリクエストからは一切パス・保存先を受け付けない
+（spec 3節のセキュリティ要件）。`/api/schema` マウント1つのミドルウェア内
+で、Connect がマウントパスを除去した後の `req.url`（`''`/`'/'` =
+`/api/schema` 本体、`'/verify-save'` = 別名保存用）でサブパスを判定して
+分岐している——Connect の `use(mountpath, fn)` は `mountpath` を prefix
+とする全リクエストを同一ハンドラに渡すため。`options.readOnly` が真の場合
+`/api/schema` への POST は body を読む前に403で拒否し、`/api/schema/
+verify-save` への POST は `readOnly` の値に関わらず動作する（対象ファイル
+への書き込みではなく、生成時に固定した `saveDir` への書き込みのため）。
+生成ファイル名は純粋関数 `buildVerifySaveFilename(originalFilePath, now =
+new Date())` が担い、元ファイルの拡張子直前にISO 8601タイムスタンプ
+（`:` は `-` に置換）を挿入する。`/api/schema`・`/api/schema/verify-save`
+以外のパス・対応外のメソッドは `next()` で後続のVite内部ルーティングに
+委譲する。
 
 `tests/localApi.test.ts` は `vi.mock('node:fs/promises', ...)` で `readFile`/
 `writeFile`/`mkdir` をモックし、`configureServer` に渡されるフェイクの
@@ -77,16 +99,22 @@ Vite の `configureServer` フック（Connect ミドルウェア）として実
 ## 4. `src/local/localSync.ts` / `src/hooks/useLocalSync.ts`
 
 `localSync.ts` はフレームワーク非依存の薄い `fetch` ラッパー
-（`isLocalMode`/`fetchSchema`/`saveSchema`）。`isLocalMode()` は
-`import.meta.env.VITE_LOCAL_FILE` の真偽値を返すだけで、実行時に変化
-しないビルド時フラグである。
+（`isLocalMode`/`getStartupMode`/`fetchSchema`/`saveSchema`/
+`saveSchemaAs`）。`isLocalMode()` は `import.meta.env.VITE_LOCAL_FILE` の
+真偽値を、`getStartupMode()`（Issue #32）は `import.meta.env.
+VITE_STARTUP_MODE` が `'verify'` かどうかを返すだけで、いずれも実行時に
+変化しないビルド時フラグである。`saveSchemaAs()` は `POST /api/schema/
+verify-save` を叩き、成功時にサーバーが実際に書き込んだ絶対パスを
+`{ path }` として返す（`saveSchema()` とほぼ同型）。
 
-`useLocalSync.ts` はこれを React の状態管理でラップし、`save`/`reload` の
-実行状態を `GitHubSettingsPanel`（旧実装）と同じ判別共用体パターン
-（`{ kind: 'idle' | 'pending' | 'success' | 'error' }`）で表現する。この
-フック自体の単体テストは書いていない——本リポジトリには元々Reactフック/
-コンポーネント単体テストの慣習がなく（`@testing-library/react` 未導入）、
-UI層の動作確認は目視確認ツール（`tools/visual-check/`）に委ねている。
+`useLocalSync.ts` はこれを React の状態管理でラップし、`save`/`verifySave`/
+`reload` の実行状態を `GitHubSettingsPanel`（旧実装）と同じ判別共用体
+パターン（`{ kind: 'idle' | 'pending' | 'success' | 'error' }`。`success`
+は Issue #32 で任意の `path?: string` を持てるよう拡張し、`verifySave` の
+成功時に保存先パスを載せる）で表現する。このフック自体の単体テストは
+書いていない——本リポジトリには元々Reactフック/コンポーネント単体テストの
+慣習がなく（`@testing-library/react` 未導入）、UI層の動作確認は目視確認
+ツール（`tools/visual-check/`）に委ねている。
 
 ## 5. `useSqlRunner` の拡張（起動時サイレント自動ロード）
 
@@ -138,13 +166,23 @@ Save ボタンの活性条件は旧 `GitHubSettingsPanel.canPush` と同じ
 `saveDisabled` として渡す）。Save ボタンには `data-testid="save-to-file-btn"`
 を付与している（目視確認シナリオでの選択用）。
 
+**起動時モードが `verify`（Issue #32）の場合**、`saveDisabled` はあえて
+変更しない——別名保存自体は検証モードでも実行可能な操作のため、無効化する
+のではなく `App.tsx`（`verifyMode` 判定）が `handleSave` の呼び先を
+`localSync.save` から `localSync.verifySave` へ切り替える形で対応する。
+`LocalSyncControls` は追加の `verifyMode: boolean` prop を受け取り、
+(a) Save ボタンの `aria-label`/`title` を「一時ファイルへ保存（検証
+モード）」に変更し、(b) ボタン列の先頭に「検証モード」バッジを表示し、
+(c) `saveStatus.kind === 'success' && saveStatus.path` のとき保存先パスを
+（エラー表示と対称的な緑色の）成功メッセージとして表示する。
+
 ## 7. テスト方針
 
 | レイヤー | テストファイル | 手法 |
 |---|---|---|
-| `apiPlugin.ts` | `tests/localApi.test.ts` | `node:fs/promises` をモック、フェイクの `server.middlewares.use` |
-| `openLocal.mjs` | `tests/openLocal.test.ts` | `vite`/`../src/local/apiPlugin`/`node:child_process` をモック |
-| `localSync.ts` | `tests/localMode.test.ts` | `vi.stubEnv`/`vi.stubGlobal('fetch', ...)`（`tests/pushSchema.test.ts` と同じパターン） |
+| `apiPlugin.ts` | `tests/localApi.test.ts` | `node:fs/promises` をモック、フェイクの `server.middlewares.use`。`readOnly`/`saveDir`/`buildVerifySaveFilename` のケースを含む |
+| `openLocal.mjs` | `tests/openLocal.test.ts` | `vite`/`../src/local/apiPlugin`/`node:child_process` をモック。`parseArgs`/`--mode`/`--save-dir` のバリデーションを含む |
+| `localSync.ts` | `tests/localMode.test.ts` | `vi.stubEnv`/`vi.stubGlobal('fetch', ...)`（`tests/pushSchema.test.ts` と同じパターン）。`getStartupMode`/`saveSchemaAs` を含む |
 | `useLocalSync.ts`/UI | — | 単体テストなし。`tools/visual-check/` による目視確認に委ねる（5節参照） |
 
 `generateDdl()`（`tests/ddlExport.test.ts`）は無改修のため既存テストの
@@ -160,6 +198,12 @@ Save ボタンの活性条件は旧 `GitHubSettingsPanel.canPush` と同じ
 3. 保存済みファイルを指定して再起動すると、Runボタンを押さずにキャンバス
    へテーブルが自動復元され、実行ログには何も追加されない（サイレント
    ロードの仕様通り）こと。
+4. （Issue #32）`npm run sql-studio -- <path> --mode=verify` で起動すると
+   ヘッダーに「検証モード」バッジが表示され、Save 押下後も対象ファイルの
+   内容が変化しないこと。`tools/acceptance-check/` で実ファイルI/Oを伴う
+   自動判定を別途行う（受け入れ基準は
+   [docs/alpha-phase-acceptance-criteria.md](./alpha-phase-acceptance-criteria.md)
+   を参照）。
 
 ## 8. 既知の制限
 
