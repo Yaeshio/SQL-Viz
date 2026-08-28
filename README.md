@@ -29,12 +29,13 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
 - 複数の SQL 文をセミコロン区切りで一括入力し、1文ずつ順番にアニメーション再生
 - パースエラー時はエラーメッセージを表示し、直前の状態を保持（ロールバック）
 - 実行中（アニメーション再生中）は実行ボタンを無効化し、状態の競合を防止
-- ローカルCLI経由でのスキーマ永続化（`npm run sql-studio -- <path>`） —
-  指定したファイルをブラウザ起動時にサイレントで読み込んでキャンバスへ
-  復元し、Save/Reloadボタンでファイルと同期できる（詳細は「セットアップ」
-  節を参照）。**このホスティング版（Vercel）にはこの機能がなく、デモ用途
-  に限られる**。実際の設計作業に使いたい場合は、リポジトリをローカルへ
-  インストールして `npm run sql-studio` 経由で使うことを推奨する
+- ローカルCLI経由でのスキーマ永続化（`npm run sql-studio -- <path>`、または
+  Docker 経由 →「セットアップ」節） — 指定したファイルをブラウザ起動時に
+  サイレントで読み込んでキャンバスへ復元し、Save/Reloadボタンでファイルと
+  同期できる（詳細は「セットアップ」節を参照）。**このホスティング版
+  （Vercel）にはこの機能がなく、デモ用途に限られる**。実際の設計作業に
+  使いたい場合は、リポジトリをローカルへインストールして
+  `npm run sql-studio` 経由で使うことを推奨する
 
 ### 現時点でのスコープ外
 
@@ -162,13 +163,35 @@ npm run sql-studio -- schema/ddl.sql --mode=verify
 npm run sql-studio -- schema/ddl.sql --mode=verify --save-dir=/path/to/scratch
 ```
 
+### Docker で起動（リポジトリの clone / Node 構築なし）
+
+`npm run sql-studio` と同じものを、SQL-Viz リポジトリの clone や Node 環境
+構築なしで使うための**追加の**起動手段です（Issue #31）。イメージはレジストリ
+公開せず、各マシンでローカル `docker build` します。
+
+```bash
+# ビルド（初回のみ。コンテキストはリポジトリルート）
+docker build -f docker/sql-studio/Dockerfile -t sql-studio .
+
+# 対象プロジェクトのディレクトリで
+docker run --rm \
+  -p 127.0.0.1:5173:5173 \
+  -v "$(pwd):/workspace" \
+  --user "$(id -u):$(id -g)" \
+  sql-studio /workspace/db/schema.sql
+```
+
+`-p` は **必ず `127.0.0.1:5173:5173`**（`-p 5173:5173` にしない）。理由・
+`--user` の注意・`--mode=verify` の使い方・エージェント CLI/API との併用は
+[`docker/sql-studio/README.md`](docker/sql-studio/README.md) を参照してください。
+
 ### エージェント向け情報
 
-`npm run sql-studio` の起動時（`author`/`verify` いずれのモードでも）、
-コンソールに改修提案ドキュメント（変更前後のスキーマ抜粋・検証に使った
-クエリ例をまとめた文書）の書き方をまとめたワークフロー仕様書へのURLが
-常に印字されます。このURLはGitHub上の恒久リンクであり、SQL-Viz自身の
-ローカルチェックアウトがなくても（将来のDocker配布経由での利用時等でも）
+`npm run sql-studio` の起動時（`author`/`verify` いずれのモードでも。Docker
+経由の起動でも同じ）、コンソールに改修提案ドキュメント（変更前後のスキーマ
+抜粋・検証に使ったクエリ例をまとめた文書）の書き方をまとめたワークフロー
+仕様書へのURLが常に印字されます。このURLはGitHub上の恒久リンクであり、
+SQL-Viz自身のローカルチェックアウトがなくても（Docker 経由での利用時でも）
 参照できます。詳細は
 [`docs/agent-proposal-workflow-spec.md`](docs/agent-proposal-workflow-spec.md)
 を参照してください。エージェント向けSQL実行API/CLI（`GET`/`POST
@@ -184,6 +207,7 @@ npm run sql-studio -- schema/ddl.sql --mode=verify --save-dir=/path/to/scratch
 | `npm run dev` | Vite の開発サーバーを起動 |
 | `npm run sql-studio -- <path>` | ローカルCLIモードで起動（スキーマファイルの読み書きが可能） |
 | `npm run sql-studio -- <path> --mode=verify [--save-dir=<path>]` | 検証モードで起動（対象ファイルへは書き込まない。Save は一時ディレクトリへ別名保存） |
+| `docker build -f docker/sql-studio/Dockerfile -t sql-studio .` → `docker run --rm -p 127.0.0.1:5173:5173 -v "$(pwd):/workspace" --user "$(id -u):$(id -g)" sql-studio /workspace/<path>` | `npm run sql-studio` を Docker 経由で起動（[docker/sql-studio/README.md](docker/sql-studio/README.md)） |
 | `npm run build` | 本番用ビルド（`vite build`） |
 | `npm run preview` | 本番ビルドのプレビュー |
 | `npm run lint` | ESLint 実行 |
@@ -229,6 +253,9 @@ src/
     local/           # ローカルCLIモードのSave/Reloadボタン（LocalSyncControls）
 scripts/
   openLocal.mjs      # `npm run sql-studio` のCLIエントリポイント
+  query.mjs          # エージェント向けSQL実行CLI（POST /api/query）
+docker/
+  sql-studio/        # `npm run sql-studio` を Docker 経由で起動するイメージ（Issue #31）
 docs/
   Sql animation tool spec .md   # 元の仕様書（設計意図・将来ロードマップ）
   routing-decision.md           # ルーティング非対応の決定と理由
@@ -236,6 +263,7 @@ docs/
   local-cli-sync-design.md      # ローカルCLI永続化の実装詳細
   agent-query-api-spec.md       # エージェント向けSQL実行API/CLIの仕様
   agent-proposal-workflow-spec.md # 改修提案ドキュメント作成ワークフロー仕様
+  issue31-docker-e2e-runbook.md # Docker イメージの E2E 検証手順書
 tests/
   *.test.ts    # Vitest ユニットテスト
 ```
@@ -246,7 +274,9 @@ tests/
   タブ内で完結する WebAssembly 版 PostgreSQL）に対して実行され、ネットワーク
   通信を一切伴わない、という意味ですべてクライアントサイドで完結する
   （ただしローカルCLIモードで起動した場合に限り、ブラウザは同一マシン上の
-  `127.0.0.1` にのみバインドされたローカルサーバーとスキーマファイルを
-  やり取りする。外部データベースやリモートサーバーへの通信ではない）
+  ローカルサーバーとスキーマファイルをやり取りする。非Docker経路では
+  `127.0.0.1` にのみバインドされ、Docker経路では `docker run -p 127.0.0.1:5173:5173`
+  でループバックに限定して公開する。いずれも外部データベースやリモート
+  サーバーへの通信ではない）
 - 1テーブルあたりの表示行数は多量データの可視化を想定していない（プロトタイプ規模を想定）
 - 対応 SQL は ANSI 標準に近いサブセットのみで、方言固有拡張（MySQL/PostgreSQL 独自構文など）は非対応

@@ -9,7 +9,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run sql-studio -- <path/to/schema.sql>` — ローカルCLIモード。指定
   ファイルをサイレントに読み込み、Save/Reloadボタンでファイルと同期する
   （Issue #26、[docs/local-cli-sync-spec.md](docs/local-cli-sync-spec.md)参照。
-  Node 22.6以上が必要）
+  Node 22.6以上が必要）。リポジトリの clone / Node 構築なしで使う Docker 経由の
+  起動手段もある（Issue #31、`docker build -f docker/sql-studio/Dockerfile
+  -t sql-studio .` → `docker run --rm -p 127.0.0.1:5173:5173 -v "$(pwd):/workspace"
+  --user "$(id -u):$(id -g)" sql-studio /workspace/<path>`。
+  [docker/sql-studio/README.md](docker/sql-studio/README.md)、E2E検証は
+  [docs/issue31-docker-e2e-runbook.md](docs/issue31-docker-e2e-runbook.md)）
 - `npm run build` — 本番用ビルド（`vite build`）
 - `npm run preview` — 本番ビルドのプレビュー
 - `npm run lint` — プロジェクト全体への ESLint 実行
@@ -224,6 +229,21 @@ Issue #33 で、Issue #27のクエリAPI/CLIとIssue #32の`verify`起動モー�
 GitHub URLが常に印字される。詳細は
 [docs/agent-proposal-workflow-spec.md](docs/agent-proposal-workflow-spec.md)
 を参照。
+
+Issue #31 で、上記 `npm run sql-studio` と同一エントリ（`scripts/openLocal.mjs`）を
+Docker コンテナからも起動できるようにした（`docker/sql-studio/Dockerfile`。
+レジストリ公開はせずローカル `docker build` のみ、`npm test`/CI 非組み込み）。
+`vite.config.ts` は無改修で、`spawnVite` に `host`/`cacheDir` 引数を足し、
+`main()` が `SQL_STUDIO_HOST`（Docker では `0.0.0.0`）/ `SQL_STUDIO_CACHE_DIR`
+（`--user` 実行でも Vite の依存事前バンドルキャッシュを書けるよう `/tmp` 配下）
+環境変数を読む——いずれも既定は現状挙動のため既存経路は無改修。LAN 到達不能性は
+Docker 経路では利用者の `docker run -p 127.0.0.1:5173:5173` 指定に委ねられる。
+E2E 検証は既存の `tools/acceptance-check/scenarios/*.mjs` を無改修で
+`docker run ... sql-studio` に対して実行する手順書
+[docs/issue31-docker-e2e-runbook.md](docs/issue31-docker-e2e-runbook.md)
+（検証用リポジトリは `tools/acceptance-check/fixtures/make-e2e-target-repo.mjs`
+で決定論的に生成）で行う。詳細は
+[docker/sql-studio/README.md](docker/sql-studio/README.md) を参照。
 
 ## エージェント目視確認用ツール（Playwright）
 
