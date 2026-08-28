@@ -1,0 +1,14 @@
+# docker/sql-studio/Dockerfile のビルドコンテキストはリポジトリルート。
+# イメージに不要な、または再生成される成果物を除外する。
+.git
+.github
+node_modules
+dist
+dist-ssr
+**/node_modules
+tools/visual-check/out
+.claude
+*.log
+npm-debug.log*
+repomix-output.xml
+**/*:Zone.Identifier

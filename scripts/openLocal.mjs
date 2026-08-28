@@ -57,13 +57,29 @@ export function openBrowser(url, platform = process.platform) {
  * itself never has to know about local-mode. createServer() still auto-loads
  * vite.config.ts and merges this inline config into it (configFile isn't set
  * to false), so react() etc. from that file keep working unchanged.
- * @param {{ filePath: string, port?: number, mode?: 'author' | 'verify', saveDir?: string }} opts */
-export async function spawnVite({ filePath, port, mode = 'author', saveDir = undefined }) {
+ *
+ * `host` defaults to '127.0.0.1' (spec §5: unreachable from the LAN). The
+ * Docker entrypoint (Issue #31) overrides it to '0.0.0.0' via SQL_STUDIO_HOST
+ * so `docker run -p` can reach the server; LAN-unreachability then depends on
+ * the operator publishing the port as `-p 127.0.0.1:5173:5173`.
+ * `cacheDir` defaults to Vite's own (`node_modules/.vite`); the Docker image
+ * points it at a world-writable path via SQL_STUDIO_CACHE_DIR so a non-root
+ * `docker run --user` can still write the dep-optimize cache.
+ * @param {{ filePath: string, port?: number, mode?: 'author' | 'verify', saveDir?: string, host?: string, cacheDir?: string }} opts */
+export async function spawnVite({
+  filePath,
+  port,
+  mode = 'author',
+  saveDir = undefined,
+  host = '127.0.0.1',
+  cacheDir = undefined,
+}) {
   process.env.VITE_LOCAL_FILE = 'true';
   process.env.VITE_STARTUP_MODE = mode;
   const server = await createServer({
     plugins: [buildApiPlugin(filePath, { readOnly: mode === 'verify', saveDir }), buildQueryApiPlugin(filePath)],
-    server: { host: '127.0.0.1', port, open: false },
+    server: { host, port, open: false },
+    ...(cacheDir ? { cacheDir } : {}),
   });
   await server.listen();
   return server;
@@ -79,7 +95,12 @@ export async function main(argv = process.argv.slice(2)) {
 
   const filePath = resolveDdlPath(filePathArg);
   const resolvedSaveDir = mode === 'verify' ? (saveDir ?? DEFAULT_VERIFY_SAVE_DIR) : undefined;
-  const server = await spawnVite({ filePath, mode, saveDir: resolvedSaveDir });
+  // Non-VITE_-prefixed env vars: consumed here, never exposed to the browser
+  // bundle. Set by docker/sql-studio/Dockerfile; unset on the normal
+  // `npm run sql-studio` path so spawnVite's defaults apply.
+  const host = process.env.SQL_STUDIO_HOST || undefined;
+  const cacheDir = process.env.SQL_STUDIO_CACHE_DIR || undefined;
+  const server = await spawnVite({ filePath, mode, saveDir: resolvedSaveDir, host, cacheDir });
   server.printUrls();
   console.log(
     '改修提案ドキュメントの書き方: https://github.com/Yaeshio/SQL-Viz/blob/main/docs/agent-proposal-workflow-spec.md',

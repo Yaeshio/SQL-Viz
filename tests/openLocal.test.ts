@@ -22,6 +22,16 @@ import { main, openBrowser, parseArgs, resolveDdlPath, spawnVite } from '../scri
 
 const ORIGINAL_VITE_LOCAL_FILE = process.env.VITE_LOCAL_FILE;
 const ORIGINAL_VITE_STARTUP_MODE = process.env.VITE_STARTUP_MODE;
+const ORIGINAL_SQL_STUDIO_HOST = process.env.SQL_STUDIO_HOST;
+const ORIGINAL_SQL_STUDIO_CACHE_DIR = process.env.SQL_STUDIO_CACHE_DIR;
+
+function restoreEnv(key: string, original: string | undefined) {
+  if (original === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = original;
+  }
+}
 
 beforeEach(() => {
   createServer.mockReset();
@@ -30,19 +40,15 @@ beforeEach(() => {
   exec.mockReset();
   delete process.env.VITE_LOCAL_FILE;
   delete process.env.VITE_STARTUP_MODE;
+  delete process.env.SQL_STUDIO_HOST;
+  delete process.env.SQL_STUDIO_CACHE_DIR;
 });
 
 afterEach(() => {
-  if (ORIGINAL_VITE_LOCAL_FILE === undefined) {
-    delete process.env.VITE_LOCAL_FILE;
-  } else {
-    process.env.VITE_LOCAL_FILE = ORIGINAL_VITE_LOCAL_FILE;
-  }
-  if (ORIGINAL_VITE_STARTUP_MODE === undefined) {
-    delete process.env.VITE_STARTUP_MODE;
-  } else {
-    process.env.VITE_STARTUP_MODE = ORIGINAL_VITE_STARTUP_MODE;
-  }
+  restoreEnv('VITE_LOCAL_FILE', ORIGINAL_VITE_LOCAL_FILE);
+  restoreEnv('VITE_STARTUP_MODE', ORIGINAL_VITE_STARTUP_MODE);
+  restoreEnv('SQL_STUDIO_HOST', ORIGINAL_SQL_STUDIO_HOST);
+  restoreEnv('SQL_STUDIO_CACHE_DIR', ORIGINAL_SQL_STUDIO_CACHE_DIR);
 });
 
 describe('resolveDdlPath', () => {
@@ -125,6 +131,28 @@ describe('spawnVite', () => {
     expect(process.env.VITE_STARTUP_MODE).toBe('verify');
     expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { readOnly: true, saveDir: '/tmp/x' });
   });
+
+  it('CLI-06: host未指定なら127.0.0.1、cacheDir未指定ならcreateServer引数に含めない', async () => {
+    const listen = vi.fn().mockResolvedValue(undefined);
+    createServer.mockResolvedValueOnce({ listen, resolvedUrls: { local: ['http://127.0.0.1:5199/'] }, printUrls: vi.fn() });
+
+    await spawnVite({ filePath: '/abs/schema.sql', port: 5199 });
+
+    const config = createServer.mock.calls[0][0];
+    expect(config.server).toEqual(expect.objectContaining({ host: '127.0.0.1', port: 5199, open: false }));
+    expect(config).not.toHaveProperty('cacheDir');
+  });
+
+  it('CLI-07: host/cacheDir指定時、createServerへそのまま渡す（Docker経路）', async () => {
+    const listen = vi.fn().mockResolvedValue(undefined);
+    createServer.mockResolvedValueOnce({ listen, resolvedUrls: { local: ['http://localhost:5173/'] }, printUrls: vi.fn() });
+
+    await spawnVite({ filePath: '/abs/schema.sql', host: '0.0.0.0', cacheDir: '/tmp/sql-viz-vite-cache' });
+
+    const config = createServer.mock.calls[0][0];
+    expect(config.server).toEqual(expect.objectContaining({ host: '0.0.0.0', open: false }));
+    expect(config.cacheDir).toBe('/tmp/sql-viz-vite-cache');
+  });
 });
 
 describe('main', () => {
@@ -153,10 +181,28 @@ describe('main', () => {
       expect.stringContaining('/schema/ddl.sql'),
       { readOnly: false, saveDir: undefined },
     );
+    // SQL_STUDIO_HOST unset → spawnVite's default 127.0.0.1 (regression guard
+    // for the non-Docker path).
+    expect(createServer.mock.calls[0][0].server).toEqual(
+      expect.objectContaining({ host: '127.0.0.1', open: false }),
+    );
     expect(exec).toHaveBeenCalledWith(
       expect.stringContaining('http://127.0.0.1:5173/'),
       expect.any(Function),
     );
+  });
+
+  it('SQL_STUDIO_HOST/SQL_STUDIO_CACHE_DIR が設定されていればcreateServerへ伝播する', async () => {
+    const listen = vi.fn().mockResolvedValue(undefined);
+    createServer.mockResolvedValueOnce({ listen, resolvedUrls: { local: ['http://localhost:5173/'] }, printUrls: vi.fn() });
+    process.env.SQL_STUDIO_HOST = '0.0.0.0';
+    process.env.SQL_STUDIO_CACHE_DIR = '/tmp/sql-viz-vite-cache';
+
+    await main(['schema/ddl.sql']);
+
+    const config = createServer.mock.calls[0][0];
+    expect(config.server).toEqual(expect.objectContaining({ host: '0.0.0.0', open: false }));
+    expect(config.cacheDir).toBe('/tmp/sql-viz-vite-cache');
   });
 
   it('不正な --mode → stderrにusage出力、exit code 1、viteは起動しない', async () => {

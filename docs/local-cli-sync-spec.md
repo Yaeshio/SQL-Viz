@@ -39,7 +39,10 @@ Contents API へ直接 push することでスキーマを永続化していた�
   （ローカル完結の方がシンプルで本ツールの性質に合うという判断）。
 - CLI 自体は npm 公開せず、本リポジトリ内のローカルスクリプトとして提供する
   （`npm run sql-studio -- <path>`）。公開・バージョン管理の運用コストを
-  避けるため。
+  避けるため。追加の起動手段として、リポジトリの clone や Node 環境構築なしで
+  使えるよう **ローカル `docker build` した Docker イメージ**も提供する
+  （Issue #31、`docker/sql-studio/Dockerfile`。レジストリ公開はしない）。
+  既存の `npm run sql-studio` 経路は置き換えず維持し、Docker は上乗せの選択肢。
 - アプリはファイルの書き込み/読み込みにのみ徹し、`git add`/`commit`/`push`
   は一切自動化しない。commit/push はユーザー自身の既存ワークフロー
   （VSCode/ターミナル）に委ねる。
@@ -113,9 +116,9 @@ Contents API へ直接 push することでスキーマを永続化していた�
 
 **ファイルパス・保存先ディレクトリ・生成ファイル名は、いずれもCLI起動時に
 サーバー側で固定/生成され、リクエストパラメータとしては一切受け取らない。**
-任意パス書き込み脆弱性を避けるための必須要件である。サーバーは
-`127.0.0.1` にのみバインドし、ローカルホスト外からのアクセスを受け付け
-ない。
+任意パス書き込み脆弱性を避けるための必須要件である。サーバーの
+ネットワーク到達範囲（非Docker経路は `127.0.0.1` バインド、Docker経路は
+ポート公開の指定に依存）については5節を参照。
 
 ## 4. ホスティング版との違い
 
@@ -131,8 +134,17 @@ Contents API へ直接 push することでスキーマを永続化していた�
 
 - ファイルパスをCLI起動時の引数に限定し、リクエストから受け取らない
   （3節）。
-- サーバーを `127.0.0.1` のみにバインドし、LAN上の他ホストからアクセス
-  できないようにする。
+- **非Docker経路（`npm run sql-studio`）**: サーバーを `127.0.0.1` のみに
+  バインドし、LAN上の他ホストからアクセスできないようにする
+  （`scripts/openLocal.mjs` の `spawnVite` が `host` を既定 `'127.0.0.1'` で固定）。
+- **Docker経路（Issue #31）**: コンテナ内サーバーは `0.0.0.0` にバインドされる
+  （`docker run -p` のポート公開を届かせるため。イメージの `SQL_STUDIO_HOST=0.0.0.0`）。
+  したがってLAN到達不能性は、利用者が
+  **`docker run -p 127.0.0.1:5173:5173`（`-p 5173:5173` ではなく）** と
+  ループバック限定でポート公開することに委ねられる。誤って `-p 5173:5173` と
+  すると `HostIp` が `0.0.0.0` になりLANから到達可能になる。詳細と検証手順は
+  [docker/sql-studio/README.md](../docker/sql-studio/README.md) と
+  [docs/issue31-docker-e2e-runbook.md](./issue31-docker-e2e-runbook.md) を参照。
 - 保存対象はテーブル構造（DDL）のみであり、行データやPATのような機密情報を
   扱わない。旧方式で必要だった「PATの保存期間」等のセキュリティ考慮事項は
   本方式では発生しない（認証層自体が存在しない）。
@@ -154,6 +166,9 @@ Contents API へ直接 push することでスキーマを永続化していた�
 ## 7. 参照
 
 - [Issue #26](https://github.com/Yaeshio/SQL-Viz/issues/26)
+- [Issue #31](https://github.com/Yaeshio/SQL-Viz/issues/31)（Docker 経由の起動手段）
 - 実装詳細: [local-cli-sync-design.md](./local-cli-sync-design.md)
+- Docker イメージ: [docker/sql-studio/README.md](../docker/sql-studio/README.md)、
+  E2E 検証手順書: [docs/issue31-docker-e2e-runbook.md](./issue31-docker-e2e-runbook.md)
 - 旧仕様（廃止・リポジトリ履歴のみ）: `docs/github-sync-spec.md`,
   `docs/github-sync-design.md`

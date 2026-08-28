@@ -13,6 +13,8 @@
 | `src/local/localSync.ts` | ブラウザ側の薄いfetchラッパー（`isLocalMode`/`getStartupMode`/`fetchSchema`/`saveSchema`/`saveSchemaAs`） |
 | `src/hooks/useLocalSync.ts` | `localSync.ts` を状態管理でラップするReactフック |
 | `src/components/local/LocalSyncControls.tsx` | ヘッダーのSave/Reloadボタン（旧GitHub設定ギアの置き換え） |
+| `docker/sql-studio/Dockerfile` + `README.md` | `npm run sql-studio` 相当をコンテナから起動する追加手段（Issue #31）。`.dockerignore` はリポジトリルート |
+| `tools/acceptance-check/fixtures/make-e2e-target-repo.mjs` | Issue #31 の E2E 検証用「対象プロジェクト」リポジトリを決定論的に生成 |
 
 再利用（無改修）: `src/pglite/ddlExport.ts` の `generateDdl()`。GitHub非依存
 の設計だったため、保存対象を `POST /api/schema` に差し替えるだけで済んだ。
@@ -43,11 +45,23 @@ inline config をマージするため、`react()` 等の既存プラグイン�
   対称的なパターン）: `--mode=`/`--save-dir=` をプレフィックス一致で拾い、
   残りは positional（先頭がDDLファイルパス）として返す。`mode` は未指定時
   `'author'`。
-- `spawnVite({ filePath, port, mode = 'author', saveDir })`:
+- `spawnVite({ filePath, port, mode = 'author', saveDir, host = '127.0.0.1',
+  cacheDir })`:
   `process.env.VITE_LOCAL_FILE = 'true'` と `process.env.VITE_STARTUP_MODE
   = mode` をセットしてから `createServer()` を呼び、
   `buildApiPlugin(filePath, { readOnly: mode === 'verify', saveDir })` を
-  注入し、`server.host: '127.0.0.1'` に固定して `listen()` する。
+  注入し、`server.host` を（既定は `'127.0.0.1'`）バインド先として `listen()`
+  する。`cacheDir` は指定時のみ inline config に載せる（Vite 既定は
+  `node_modules/.vite`）。`host`/`cacheDir` の既定値は `undefined` のときのみ
+  効くため、既存の引数なし呼び出し・テスト・`tools/acceptance-check` は
+  無改修で通る。
+- `main()` は `SQL_STUDIO_HOST` / `SQL_STUDIO_CACHE_DIR` 環境変数（`VITE_`
+  プレフィックスなし = ブラウザバンドルには載らない）を読んで `spawnVite` へ
+  転送する。通常の `npm run sql-studio` 実行では両方未設定 → 既定挙動。
+  Docker イメージ（`docker/sql-studio/Dockerfile`、Issue #31）だけがこれらを
+  設定する（`SQL_STUDIO_HOST=0.0.0.0` でコンテナ外から到達可能にし、
+  `SQL_STUDIO_CACHE_DIR=/tmp/...` で `docker run --user` の非 root 実行でも
+  Vite の依存事前バンドルキャッシュが書けるようにする）。
 - `main(argv)`: `parseArgs()` の結果を検証し、ファイルパス未指定・`mode` が
   `author`/`verify` 以外・`--save-dir` が `--mode=verify` なしで指定
   のいずれかに該当する場合は usage を stderr へ出力して exit code 1 で
@@ -181,7 +195,7 @@ Save ボタンの活性条件は旧 `GitHubSettingsPanel.canPush` と同じ
 | レイヤー | テストファイル | 手法 |
 |---|---|---|
 | `apiPlugin.ts` | `tests/localApi.test.ts` | `node:fs/promises` をモック、フェイクの `server.middlewares.use`。`readOnly`/`saveDir`/`buildVerifySaveFilename` のケースを含む |
-| `openLocal.mjs` | `tests/openLocal.test.ts` | `vite`/`../src/local/apiPlugin`/`node:child_process` をモック。`parseArgs`/`--mode`/`--save-dir` のバリデーションを含む |
+| `openLocal.mjs` | `tests/openLocal.test.ts` | `vite`/`../src/local/apiPlugin`/`node:child_process` をモック。`parseArgs`/`--mode`/`--save-dir` のバリデーション、`SQL_STUDIO_HOST`/`SQL_STUDIO_CACHE_DIR` の `createServer` への伝播（Issue #31）を含む |
 | `localSync.ts` | `tests/localMode.test.ts` | `vi.stubEnv`/`vi.stubGlobal('fetch', ...)`（`tests/pushSchema.test.ts` と同じパターン）。`getStartupMode`/`saveSchemaAs` を含む |
 | `useLocalSync.ts`/UI | — | 単体テストなし。`tools/visual-check/` による目視確認に委ねる（5節参照） |
 
@@ -205,11 +219,27 @@ Save ボタンの活性条件は旧 `GitHubSettingsPanel.canPush` と同じ
    [docs/alpha-phase-acceptance-criteria.md](./alpha-phase-acceptance-criteria.md)
    を参照）。
 
+Docker 経路（Issue #31）は `npm test`/CI には組み込まず、
+[docs/issue31-docker-e2e-runbook.md](./issue31-docker-e2e-runbook.md) の手順で
+検証する（既存の `tools/acceptance-check/scenarios/*.mjs` を無改修で
+`docker run ... sql-studio` に対して実行し、`--user` によるファイル所有権・
+`-p 127.0.0.1:` による LAN 到達不能性・非 Docker 経路の回帰も併せて確認する）。
+
 ## 8. 既知の制限
 
 - WSL2 環境では `xdg-open` が存在しない場合があり、ブラウザ自動起動に
   失敗することがある（`openBrowser` はこの場合コンソールにURLを表示する
-  フォールバックを持つ）。
+  フォールバックを持つ）。Docker イメージ（Issue #31）では `xdg-open` が
+  常に無いため `openBrowser` は毎回このフォールバックに入る（想定内）。
+- Docker 経路では、コンテナ内で Vite が 5173 を採れず別ポートにずれると
+  `docker run -p ...:5173` が合わなくなる（`openLocal.mjs` に `--port`
+  指定手段は無い）。コンテナ内で 5173 は通常空いているため実用上は問題ない。
+- `docker/sql-studio/Dockerfile` の `npm ci` は `package-lock.json` に固定
+  された `vite`（現在 5.4.8）を入れる。Vite 5.4.12+ で追加された
+  `server.allowedHosts` によるホストチェックはこのバージョンには無いため、
+  コンテナへ `host.docker.internal` 等の Host ヘッダーでアクセスしても
+  ブロックされない。将来 lock を bump する場合は `spawnVite` の inline
+  config に `server.allowedHosts`（Docker 経路のみ許可）を足す必要がある。
 - `npm run build`（Vercelビルド）はローカルモードUIを一切含まない
   静的SPAをそのまま出力する。ローカルCLIモードのコード
   （`src/local/`, `src/hooks/useLocalSync.ts`,
