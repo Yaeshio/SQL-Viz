@@ -26,6 +26,13 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
   - 条件に一致しない行はキャンバス上でフェードアウト（配列から削除ではなく `filteredOut` フラグの反転）
   - 前回の `WHERE` で除外されていた行が再び一致すればフェードインで復帰
   - 選択されたカラムをハイライト表示
+- `ALTER TABLE ... ADD COLUMN` / `DROP COLUMN`（1文につき単一アクションのみ）
+  — カラムのフェードイン／フェードアウト
+- `DROP TABLE`（1文につき単一テーブルのみ）— テーブルの退場アニメーション
+- `UPDATE ... SET ... [WHERE col <op> value]` — 対象セルの値更新アニメーション
+- `DELETE FROM ... [WHERE col <op> value]` — 対象行の退場アニメーション
+- `WHERE` は `SELECT` / `UPDATE` / `DELETE` いずれも
+  **単一の `<col> <op> <value>` 比較のみ**（`AND` / `OR` / `JOIN` は非対応）
 - 複数の SQL 文をセミコロン区切りで一括入力し、1文ずつ順番にアニメーション再生
 - パースエラー時はエラーメッセージを表示し、直前の状態を保持（ロールバック）
 - 実行中（アニメーション再生中）は実行ボタンを無効化し、状態の競合を防止
@@ -37,13 +44,31 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
   使いたい場合は、リポジトリをローカルへインストールして
   `npm run sql-studio` 経由で使うことを推奨する
 
+### 設計モード / 実験モード
+
+ヘッダーの `ModeToggle` で **設計モード** と **実験モード** を切り替えます
+（`src/hooks/useAppMode.ts`、既定は設計モード。詳細は
+[`docs/mode-and-sql-scope-spec.md`](docs/mode-and-sql-scope-spec.md)）。
+
+- **設計モード** — `CREATE` / `ALTER` / `DROP` のみ許可。テーブル構造を編集する
+- **実験モード** — `SELECT` / `INSERT` / `UPDATE` / `DELETE` のみ許可。
+  データ操作を試す
+
+1文でも現在のモードで許可されていない文が含まれていれば、どの文も実行せず
+パースエラーと同じ all-or-nothing で拒否されます。実験モードで行った
+`INSERT` / `UPDATE` / `DELETE` は未コミットのトランザクションに積まれ、
+設計モードへ戻ると `ROLLBACK` でまとめて破棄されます（テーブル構造は
+設計モードでしか変更できないため、モード遷移をまたいで永続化されるのは
+テーブル構造のみ）。
+
 ### 現時点でのスコープ外
 
 - `AND` / `OR` / `LIKE` / `IN` / `BETWEEN` などを含む複合 `WHERE`
 - `JOIN`（カンマ区切りの複数テーブル指定を含む）
-- `UPDATE` / `DELETE` / `ALTER TABLE`
+- `ALTER TABLE` の `RENAME`・型変更・1文での複数アクション同時指定
 - 集計（`GROUP BY`/`HAVING`）・整列（`ORDER BY`）・`LIMIT`・`DISTINCT`
-- サブクエリ・`UNION`・`WITH`句（CTE）・トランザクション
+- サブクエリ・`UNION`・`WITH`句（CTE）・明示的な `BEGIN`/`COMMIT` 文
+  （実験モードが内部で使う暗黙のトランザクション／ロールバックとは別物）
 - `CREATE TABLE ... AS SELECT` / `IF NOT EXISTS`、`PRIMARY KEY`/`INDEX`/`FOREIGN KEY`
   等の制約定義
 - `INSERT ... SELECT` / `ON DUPLICATE KEY UPDATE`
@@ -69,9 +94,9 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
 
 ## アーキテクチャ
 
-SQL 文字列は「文分割 → 事前検証 → 実行（PGlite）→ スナップショット再構築 →
-レイアウト → 差分 → アニメーション」のパイプラインを1文ずつ順番に通過します
-（`src/hooks/useSqlRunner.ts` の `run()` が駆動）。
+SQL 文字列は「文分割 → 事前検証 → モードゲート → 実行（PGlite）→
+スナップショット再構築 → レイアウト → 差分 → アニメーション」のパイプラインを
+1文ずつ順番に通過します（`src/hooks/useSqlRunner.ts` の `run()` が駆動）。
 
 ```
 SQL文字列
@@ -80,42 +105,57 @@ SQL文字列
                   セミコロン区切りの文字列を1文ずつに分割する
    ↓
 [1] parser.ts   — node-sql-parser で AST 化し、対応構文かどうかを
-                  事前検証・分類する「ゲート」。ParsedCreate / ParsedInsert /
-                  ParsedSelect に絞り込むが、実行自体は行わない
+                  事前検証・分類する「構文ゲート」。ParsedCreate / ParsedInsert /
+                  ParsedSelect / ParsedAlter（ADD/DROP COLUMN の単一アクション
+                  のみ）/ ParsedDrop / ParsedUpdate / ParsedDelete に絞り込むが、
+                  実行自体は行わない
    ↓
-[2] pglite/engine.ts — PgEngine.run() が生の SQL 文字列をそのまま
-                  db.query() でブラウザ内の実 PostgreSQL（PGlite）に対して
-                  実行する。型不一致・制約違反・WHERE 評価はすべて本物の
-                  Postgres の挙動そのもの（エラーも Postgres のネイティブな
-                  文言がそのまま UI に出る）
+[2] pglite/engine.ts — MODE_ALLOWED_TYPES によるモードゲート。構文ゲートとは
+                  独立したレイヤーで、設計モードは create/alter/drop、実験モードは
+                  select/insert/update/delete のみ許可する。パース済みの全文が
+                  対象で、1文でも不許可なら all-or-nothing で実行せず parseError
    ↓
-[3] PgEngine.snapshotAfter() — PGlite へクエリし直して DBState を
-                  再構築する。テーブルごとの ctid → 安定行ID のマップで
-                  文をまたいだ行の同一性を保つ。SELECT の場合はここで
+[3] PgEngine.run() — ゲートを通過した生の SQL 文字列をそのまま db.query() で
+                  ブラウザ内の実 PostgreSQL（PGlite）に対して実行する。型不一致・
+                  制約違反・WHERE 評価はすべて本物の Postgres の挙動そのもの
+                  （エラーも Postgres のネイティブな文言がそのまま UI に出る）。
+                  実験モードでは最初の文の実行時に BEGIN を遅延発行し、以降の
+                  実験モード中の全文を同一の未コミットトランザクションに乗せる
+   ↓
+[4] PgEngine.snapshotAfter() — PGlite へクエリし直して DBState を再構築する。
+                  create/insert/select に加え alter（ADD/DROP COLUMN）・drop・
+                  update・delete の分岐を持つ。テーブルごとの ctid → 安定行ID の
+                  マップで文をまたいだ行の同一性を保つ。SELECT の場合はここで
                   該当行を削除せず filteredOut フラグを反転させるだけ
                   （フェードアウト演出のための設計は PGlite 導入後も同じ）
    ↓
-[4] layout.ts   — layoutTables() がキャンバス幅に応じて各テーブルへ
+[5] layout.ts   — layoutTables() がキャンバス幅に応じて各テーブルへ
                   グリッド状の x/y 座標を割り当てる（無変更）
    ↓
-[5] diff.ts     — diffStates(old, next) が新旧の DBState を比較し、
-                  順序付き AnimationEvent[] を生成する（無変更）
+[6] diff.ts     — diffStates(old, next) が新旧の DBState を比較し、順序付き
+                  AnimationEvent[]（table_appear/table_remove、column_add/
+                  column_drop、row_add/row_remove/row_update、row_filter/
+                  row_unfilter、select_highlight）を生成する
    ↓
-[6] hooks/useSqlRunner.ts + hooks/useAnimationPlayer.ts
+[7] hooks/useSqlRunner.ts + hooks/useAnimationPlayer.ts
                 — playEvents() がイベントを順に処理し、React state を
                   更新しながら components/canvas/Canvas.tsx（framer-motion）
                   でアニメーション再生（無変更）
 ```
 
-[3]までが PGlite 導入（Issue #8）で置き換わった「前半部分」で、[4]以降の
-レイアウト・差分・アニメーション再生の「後半部分」は導入前から変更されて
-いません。`hooks/useSqlRunner.ts` は `PgEngine` のインスタンスを1つだけ
+`[3]` の実行部分までが PGlite 導入（Issue #8）で置き換わった部分で、`[5]` 以降の
+レイアウト・差分・アニメーション再生は導入前から変わっていません。`ALTER`/`DROP`/
+`UPDATE`/`DELETE` とモードゲートは Issue #18 で追加されました。実験モードから
+設計モードへ戻ると `PgEngine.returnToDesign()` が走り、`ROLLBACK` で実験モード中の
+データ変更を取り消したうえで（`ctidMap` / `lastState` / `rowSeq` は実験モードに
+入る直前のスナップショットから復元）、その差分を通常のアニメーションとして
+再生します。`hooks/useSqlRunner.ts` は `PgEngine` のインスタンスを1つだけ
 保持し続け（アプリのセッション中は使い回す）、初回の SQL 実行時に PGlite の
 WASM 起動（コールドスタート）を待ちます。詳細は「セットアップ」節を参照
 してください。
 
 ドメインモデルは [`src/types.ts`](src/types.ts) を単一の情報源（single source of truth）
-としています（PGlite 導入前後で無変更）。UI層（状態管理・プレゼンテーション）の構成は
+としています（`Table` / `DBState` / `AnimationEvent` / `AppMode` を定義）。UI層（状態管理・プレゼンテーション）の構成は
 下記「ディレクトリ構成」を参照してください。ルーティングは
 [`docs/routing-decision.md`](docs/routing-decision.md) の通り今回は導入していません。
 
@@ -208,6 +248,7 @@ SQL-Viz自身のローカルチェックアウトがなくても（Docker 経由
 | `npm run sql-studio -- <path>` | ローカルCLIモードで起動（スキーマファイルの読み書きが可能） |
 | `npm run sql-studio -- <path> --mode=verify [--save-dir=<path>]` | 検証モードで起動（対象ファイルへは書き込まない。Save は一時ディレクトリへ別名保存） |
 | `docker build -f docker/sql-studio/Dockerfile -t sql-studio .` → `docker run --rm -p 127.0.0.1:5173:5173 -v "$(pwd):/workspace" --user "$(id -u):$(id -g)" sql-studio /workspace/<path>` | `npm run sql-studio` を Docker 経由で起動（[docker/sql-studio/README.md](docker/sql-studio/README.md)） |
+| `npm run --silent query -- "<SQL>"` | エージェント向けSQL実行CLI（`scripts/query.mjs` → `POST /api/query`。stdin・`--mode=` 対応。`--silent` を付けないとnpmのバナーがstdoutに混ざる） |
 | `npm run build` | 本番用ビルド（`vite build`） |
 | `npm run preview` | 本番ビルドのプレビュー |
 | `npm run lint` | ESLint 実行 |
@@ -232,24 +273,28 @@ src/
   diff.ts           # 新旧 DBState の差分 → AnimationEvent[]
   types.ts          # ドメインモデルの単一の情報源
   pglite/
-    engine.ts        # PgEngine — 実PostgreSQL（PGlite/WASM）に対する実行と
-                      # DBStateスナップショットの再構築を担う実行エンジン本体
+    engine.ts        # PgEngine — 実PostgreSQL（PGlite/WASM）に対する実行・
+                      # モードゲート・DBStateスナップショット再構築を担う本体
     splitStatements.ts # セミコロン区切りのSQL文字列を1文ずつに分割
+    ddlExport.ts     # DBState（＋information_schema）→ CREATE TABLE DDL文字列
   constants/
     sampleSql.ts    # 初期表示用のサンプルSQL
   hooks/
     useSqlRunner.ts       # PgEngineの保持・SQL実行パイプラインの駆動
     useAnimationPlayer.ts # アニメーション再生タイミング制御
+    useAppMode.ts         # 設計/実験モードの状態（App.tsxが所有）
     useLocalSync.ts       # ローカルCLIモードのSave/Reload状態管理
   lib/
     canvasLayout.ts # テーブル内部（列/行のy座標・セル切り詰め・viewBox）の純粋計算
   local/
-    apiPlugin.ts     # Vite dev serverプラグイン（GET/POST /api/schema）
-    localSync.ts     # ブラウザ側のfetchラッパー（isLocalMode/fetchSchema/saveSchema）
+    apiPlugin.ts       # Vite dev serverプラグイン（GET/POST /api/schema）
+    queryApiPlugin.ts  # 同（エージェント向け GET/POST /api/query 等、Issue #27）
+    httpUtils.ts       # 上記プラグイン共用のHTTPヘルパー
+    localSync.ts       # ブラウザ側のfetchラッパー（isLocalMode/fetchSchema/saveSchema）
   components/
-    layout/         # ヘッダー・キャンバスペイン等の画面全体レイアウト部品
+    layout/         # ヘッダー・キャンバスペイン・ModeToggle（設計/実験モード切替）
     sql-editor/      # SQLエディタペイン・実行ログパネル
-    canvas/          # SVG + framer-motion によるテーブル/行の描画
+    canvas/          # SVG + framer-motion によるテーブル/行の描画（tableTypeColors.ts 含む）
     local/           # ローカルCLIモードのSave/Reloadボタン（LocalSyncControls）
 scripts/
   openLocal.mjs      # `npm run sql-studio` のCLIエントリポイント
@@ -258,11 +303,14 @@ docker/
   sql-studio/        # `npm run sql-studio` を Docker 経由で起動するイメージ（Issue #31）
 docs/
   Sql animation tool spec .md   # 元の仕様書（設計意図・将来ロードマップ）
+  user-stories.md               # 対応SQL文の範囲の選定理由
   routing-decision.md           # ルーティング非対応の決定と理由
+  mode-and-sql-scope-spec.md    # 設計/実験モードと許可SQLスコープの仕様
   local-cli-sync-spec.md        # ローカルCLI永続化の仕様（何を・なぜ）
   local-cli-sync-design.md      # ローカルCLI永続化の実装詳細
   agent-query-api-spec.md       # エージェント向けSQL実行API/CLIの仕様
   agent-proposal-workflow-spec.md # 改修提案ドキュメント作成ワークフロー仕様
+  alpha-phase-acceptance-criteria.md # α版フェーズ別の受け入れ基準
   issue31-docker-e2e-runbook.md # Docker イメージの E2E 検証手順書
 tests/
   *.test.ts    # Vitest ユニットテスト
