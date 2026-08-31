@@ -177,7 +177,7 @@ export class PgEngine {
     return new Set(rows.map((r) => ctidMap.get(String(r.__ctid))).filter((id): id is string => !!id));
   }
 
-  async run(sql: string, canvasWidth: number, mode: AppMode): Promise<RunResult> {
+  async run(sql: string, worldWidth: number, mode: AppMode): Promise<RunResult> {
     await this.ensureReady();
     const db = this.db!;
 
@@ -245,7 +245,7 @@ export class PgEngine {
       }
 
       const next = await this.snapshotAfter(stmt, current, matchedIds);
-      const laidOut = layoutTables(next, canvasWidth);
+      const laidOut = layoutTables(next, worldWidth);
       const events = diffStates(current, laidOut);
       results.push({ label, state: laidOut, events });
       current = laidOut;

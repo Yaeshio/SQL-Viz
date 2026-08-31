@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HEADER_H, PAD, ROW_H, TABLE_GAP_X, TABLE_GAP_Y, TABLE_H, TABLE_W, layoutTables } from '../src/layout';
+import { HEADER_H, PAD, ROW_H, TABLE_GAP_X, TABLE_GAP_Y, TABLE_H, TABLE_W, WORLD_W, layoutTables } from '../src/layout';
 import { makeColumn, makeRow, makeState, makeTable } from './test-utils';
 
 function tableWithShape(name: string, columnCount: number, rowCount: number) {
@@ -93,6 +93,36 @@ describe('layoutTables — 同一行内の高さ計算（特性テスト）', ()
     expect(state.tables.tall.y).toBe(expectedRow1Y);
     // 同じ行 (row=1) の y は一致する = 行内で最大高さに揃えて重なりを防いでいることの証拠
     expect(state.tables.short.y).toBe(state.tables.tall.y);
+  });
+});
+
+describe('WORLD_W — ワールド座標系の固定折り返し幅（Issue #17）', () => {
+  it('LAYOUT-WORLD-01: WORLD_W では 5 列グリッドに折り返す', () => {
+    const cols = Math.max(1, Math.floor((WORLD_W - PAD) / (TABLE_W + TABLE_GAP_X)));
+    expect(cols).toBe(5);
+  });
+
+  it('LAYOUT-WORLD-02: WORLD_W を渡すとビューポート幅に依存せず決定的に配置される', () => {
+    const tables = Array.from({ length: 7 }, (_, i) => tableWithShape(`t${i}`, 1, 0));
+    const a = makeState(tables.map((t) => ({ ...t, x: 0, y: 0 })));
+    const b = makeState(tables.map((t) => ({ ...t, x: 0, y: 0 })));
+
+    layoutTables(a, WORLD_W);
+    layoutTables(b, WORLD_W);
+
+    // t0..t4 が row0、t5/t6 が row1 に折り返る
+    expect(a.tables.t0.x).toBe(PAD);
+    expect(a.tables.t4.x).toBe(PAD + 4 * (TABLE_W + TABLE_GAP_X));
+    expect(a.tables.t4.y).toBe(PAD);
+    expect(a.tables.t5.x).toBe(PAD);
+    expect(a.tables.t6.x).toBe(PAD + (TABLE_W + TABLE_GAP_X));
+    expect(a.tables.t5.y).toBe(PAD + (TABLE_H(a.tables.t0) + TABLE_GAP_Y));
+
+    // 同じ WORLD_W なら毎回同じ座標
+    for (const name of a.order) {
+      expect(a.tables[name].x).toBe(b.tables[name].x);
+      expect(a.tables[name].y).toBe(b.tables[name].y);
+    }
   });
 });
 
