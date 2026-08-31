@@ -8,6 +8,13 @@ export const TABLE_GAP_X = 48;
 export const TABLE_GAP_Y = 56;
 export const PAD = 24;
 
+/** Fixed wrap width for the world coordinate system (Issue #17). Table
+ * positions are laid out against this constant, not the live viewport width,
+ * so the canvas can be panned/zoomed without tables reflowing and so the
+ * browser and the query-API server produce identical layouts. Sized for a
+ * 5-column grid: floor((WORLD_W - PAD) / (TABLE_W + TABLE_GAP_X)) === 5. */
+export const WORLD_W = 1680;
+
 /** Assign x/y positions to tables in a flowing grid. */
 export function layoutTables(state: DBState, canvasW: number): DBState {
   const cols = Math.max(1, Math.floor((canvasW - PAD) / (TABLE_W + TABLE_GAP_X)));

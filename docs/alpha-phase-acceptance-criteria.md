@@ -90,11 +90,18 @@ SQL-Vizのα版検証は「フェーズA: ワークフロー体験 → フェー
 明示的に依存）。
 
 - どちらのissueにも正式なAC checklistはまだ無く、提案セクションの記述が完了条件の代替になる。
-- 想定するテスト種別: ブラウザでのポインタ/ホイール操作を伴うため、将来
+- 想定するテスト種別: ブラウザでのポインタ/ホイール操作を伴うため、
   `tools/acceptance-check/scenarios/phaseB*.mjs`（Playwrightのポインタ/ホイールイベント
-  シミュレーション）として追加する見込み。
-- 具体的なアサーションは、#34の未決事項（テーブルのリサイズ時に手動配置済みテーブルの
-  再レイアウトが必要か）が解消されるまで書かない。
+  シミュレーション）として追加する。
+- **#17（パン・ズーム + Fitボタン）分は実装済み**: `scenarios/phaseB-panzoom.mjs` /
+  `orchestrate-phase-b.mjs`。`Canvas.tsx` が公開する `data-canvas-scale` /
+  `data-canvas-pan-x` / `data-canvas-pan-y` / `data-world-w` / `data-world-h` を
+  アサーション対象にし、ピクセル比較は行わない。純粋幾何（`computeWorldBox` /
+  `WORLD_W`）は `tests/canvasLayout.test.ts` / `tests/layout.test.ts`（vitest）で別途検証。
+- #17本体に未決事項は無いため、#34（ドラッグ移動）とその未決事項（テーブルの
+  リサイズ時に手動配置済みテーブルの再レイアウトが必要か）が解消される前に
+  #17単体スコープで先行実装した（Issue #17 コメントの整理に従う）。#34分の
+  アサーションはその未決事項の解消後に別モジュールで追加する。
 - `docs/smoke-test-spec.md` §3のE2E見送り決定は「将来ドラッグ操作等でUI側状態が複雑化したら
   再検討する」と明記しており、#34はまさにその再検討トリガーに該当する。ただし、その再検討は
   `tests/`のvitestスイート/CIへPlaywrightを組み込むという結論には至らず、この

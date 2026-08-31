@@ -1,13 +1,9 @@
 import type { Connect, Plugin, ViteDevServer } from 'vite';
 import type { ServerResponse } from 'node:http';
 import type { AppMode } from '../types';
+import { WORLD_W } from '../layout.ts';
 import { PgEngine } from '../pglite/engine.ts';
 import { errorMessage, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
-
-// Matches useSqlRunner.ts's `canvasRef.current?.clientWidth ?? 800` fallback
-// — this server has no real <canvas>, so it's always that fallback value,
-// not an arbitrary new constant.
-const CANVAS_WIDTH = 800;
 
 function isAppMode(value: unknown): value is AppMode {
   return value === 'design' || value === 'experiment';
@@ -46,7 +42,7 @@ export function buildQueryApiPlugin(filePath: string): Plugin {
       // Runs even for an empty file: run() always calls ensureReady() before
       // checking whether there are statements to execute, so this still
       // drives the PGlite cold start GET /api/query/health reports on.
-      const result = await engine.run(content, CANVAS_WIDTH, 'design');
+      const result = await engine.run(content, WORLD_W, 'design');
       if (result.parseError) {
         bootstrapError = result.parseError;
       } else {
@@ -79,7 +75,7 @@ export function buildQueryApiPlugin(filePath: string): Plugin {
     }
     const sql = body.sql;
     const mode = body.mode;
-    const result = await enqueue(() => engine.run(sql, CANVAS_WIDTH, mode));
+    const result = await enqueue(() => engine.run(sql, WORLD_W, mode));
     sendJson(res, 200, result);
   }
 

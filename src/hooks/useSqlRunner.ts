@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { RefObject } from 'react';
 import type { PGlite } from '@electric-sql/pglite';
 import type { AppMode, DBState } from '../types';
 import { emptyState } from '../reducer';
 import { diffStates } from '../diff';
+import { WORLD_W } from '../layout';
 import { PgEngine } from '../pglite/engine';
 import { useAnimationPlayer } from './useAnimationPlayer';
 import type { AnimationHighlight } from './useAnimationPlayer';
@@ -47,7 +47,6 @@ export interface UseSqlRunnerResult {
   updatingRows: Set<string>;
   appearingColumns: Set<string>;
   highlight: AnimationHighlight | null;
-  canvasRef: RefObject<HTMLDivElement>;
   run: (options?: RunOptions) => Promise<void>;
   reset: () => void;
   getDb: () => PGlite | null;
@@ -71,7 +70,6 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
   const [modeTransitioning, setModeTransitioning] = useState(false);
   const { appearingRows, filteringRows, updatingRows, appearingColumns, highlight, playEvents, resetAnimation } =
     useAnimationPlayer();
-  const canvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<PgEngine>();
   if (!engineRef.current) engineRef.current = new PgEngine();
   const stateRef = useRef(state);
@@ -127,7 +125,7 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
         }
       }
 
-      const { results, parseError } = await engine.run(effectiveSql, canvasRef.current?.clientWidth ?? 800, mode);
+      const { results, parseError } = await engine.run(effectiveSql, WORLD_W, mode);
       if (parseError) {
         setError(parseError);
         return;
@@ -185,7 +183,6 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     updatingRows,
     appearingColumns,
     highlight,
-    canvasRef,
     run,
     reset,
     getDb,

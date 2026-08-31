@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Table } from '../../types';
 import { HEADER_H, ROW_H, TABLE_W } from '../../layout';
@@ -20,7 +21,7 @@ interface Props {
   highlight: CanvasHighlight | null;
 }
 
-export default function TableNode({
+function TableNode({
   table,
   appearingRows,
   filteringRows,
@@ -123,3 +124,5 @@ export default function TableNode({
     </motion.g>
   );
 }
+
+export default memo(TableNode);
