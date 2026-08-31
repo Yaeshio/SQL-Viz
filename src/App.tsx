@@ -27,7 +27,6 @@ export default function App() {
     updatingRows,
     appearingColumns,
     highlight,
-    canvasRef,
     run,
     reset,
     getDb,
@@ -116,7 +115,6 @@ export default function App() {
           log={log}
         />
         <CanvasPane
-          canvasRef={canvasRef}
           tableCount={tableCount}
           state={state}
           appearingRows={appearingRows}
