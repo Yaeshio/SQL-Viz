@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPan, computeFitTransform, computeWorldBox, WORLD_MARGIN } from '../src/lib/canvasLayout';
+import { clampPan, computeFitTransform, computeWorldBox, KEEP_VISIBLE, WORLD_MARGIN } from '../src/lib/canvasLayout';
 import { TABLE_H, TABLE_W } from '../src/layout';
 import { makeColumn, makeRow, makeTable } from './test-utils';
 
@@ -79,43 +79,45 @@ describe('computeFitTransform — ビューポートにワールドを中央フ�
   });
 });
 
-describe('clampPan — ワールドを画面外へパンさせない', () => {
+describe('clampPan — ワールドを（ほぼ）画面外へパンさせない緩い制限', () => {
   const world = { width: 2000, height: 1000 };
   const viewport = { width: 800, height: 600 };
+  const k = KEEP_VISIBLE; // 140
 
-  it('CLAMP-01: 拡大時（スケール済みワールド > ビューポート）はビューポートを覆い続ける', () => {
-    // scaled world = 2000x1000 > 800x600。pos は [view-content, 0] に収まる
-    expect(clampPan({ scale: 1, positionX: 500, positionY: 300 }, viewport, world)).toEqual({
-      positionX: 0,
-      positionY: 0,
-    });
-    expect(clampPan({ scale: 1, positionX: -5000, positionY: -5000 }, viewport, world)).toEqual({
-      positionX: 800 - 2000,
-      positionY: 600 - 1000,
-    });
-  });
-
-  it('CLAMP-02: 範囲内の pan はそのまま', () => {
+  it('CLAMP-01: 範囲内の pan はそのまま（スナップしない）', () => {
     expect(clampPan({ scale: 1, positionX: -300, positionY: -100 }, viewport, world)).toEqual({
       positionX: -300,
       positionY: -100,
     });
   });
 
-  it('CLAMP-03: 縮小時（スケール済みワールド < ビューポート）は完全に画面内へ収める', () => {
-    // scale 0.2 -> scaled world 400x200、pos は [0, view-content] = [0, 400]/[0,400]
-    expect(clampPan({ scale: 0.2, positionX: -50, positionY: -50 }, viewport, world)).toEqual({
-      positionX: 0,
-      positionY: 0,
+  it('CLAMP-02: パン端では keepVisible 分だけワールドを画面内に残す', () => {
+    // X: content 2000 > view 800 -> pos ∈ [k-2000, 800-k]
+    const far = clampPan({ scale: 1, positionX: -99999, positionY: -99999 }, viewport, world);
+    expect(far.positionX).toBe(k - 2000);
+    expect(far.positionY).toBe(k - 1000);
+    const near = clampPan({ scale: 1, positionX: 99999, positionY: 99999 }, viewport, world);
+    expect(near.positionX).toBe(800 - k);
+    expect(near.positionY).toBe(600 - k);
+  });
+
+  it('CLAMP-03: レターボックス時（スケール済みワールド < ビューポート）も自由に動かせる — 中央固定しない', () => {
+    // scale 0.2 -> scaled world 400x200。旧実装は pos を [0, view-content] の
+    // 狭い範囲へ即スナップしていた（レビュー指摘の原因）。緩い制限では
+    // keepVisible を残す広い範囲まで動かせる。
+    expect(clampPan({ scale: 0.2, positionX: 60, positionY: 60 }, viewport, world)).toEqual({
+      positionX: 60,
+      positionY: 60,
     });
-    expect(clampPan({ scale: 0.2, positionX: 9999, positionY: 9999 }, viewport, world)).toEqual({
-      positionX: 800 - 400,
-      positionY: 600 - 200,
-    });
-    // 中央付近はそのまま
-    expect(clampPan({ scale: 0.2, positionX: 200, positionY: 200 }, viewport, world)).toEqual({
-      positionX: 200,
-      positionY: 200,
-    });
+    // X: content 400 -> keep = min(140,400,800)=140 -> pos ∈ [140-400, 800-140] = [-260, 660]
+    const far = clampPan({ scale: 0.2, positionX: -9999, positionY: -9999 }, viewport, world);
+    expect(far.positionX).toBe(140 - 400);
+    // Y: content 200 -> keep=min(140,200,600)=140 -> min = 140-200 = -60
+    expect(far.positionY).toBe(140 - 200);
+  });
+
+  it('CLAMP-04: keepVisible は引数で上書きできる', () => {
+    const r = clampPan({ scale: 1, positionX: 99999, positionY: 0 }, viewport, world, 0);
+    expect(r.positionX).toBe(800); // keep 0 -> world can be pushed to just touching the edge
   });
 });

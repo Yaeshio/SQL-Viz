@@ -101,18 +101,28 @@ export default function Canvas({
     [paneRef, publishTransform],
   );
 
-  // Auto-fit on mount and whenever the world grows, until the user takes manual
-  // control (interactedRef). The "Fit" button clears interactedRef to re-arm it.
+  // Auto-fit ONLY while the initial load is still streaming tables in: fit on
+  // mount and on each world-size growth, then disarm for good ~1.2s after the
+  // world stops changing (or immediately on the first manual pan/zoom). After
+  // that the view is only ever re-framed by the explicit "Fit" button — running
+  // more SQL later never yanks the camera. (Review feedback on Issue #17.)
   useEffect(() => {
     if (interactedRef.current) return;
-    const id = requestAnimationFrame(() => {
+    const raf = requestAnimationFrame(() => {
       if (!interactedRef.current) fitToContent(0);
     });
-    return () => cancelAnimationFrame(id);
+    const settle = window.setTimeout(() => {
+      interactedRef.current = true;
+    }, 1200);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(settle);
+    };
   }, [world.width, world.height, fitToContent]);
 
   const handleFit = useCallback(() => {
-    interactedRef.current = false;
+    // one-shot re-frame; does NOT re-arm auto-fit
+    interactedRef.current = true;
     // next frame: let any just-ended pan/zoom gesture finish its own cleanup
     // (pointerup) before we start the fit animation
     requestAnimationFrame(() => fitToContent(300));

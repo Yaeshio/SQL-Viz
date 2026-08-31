@@ -4,7 +4,6 @@ import { runScenario } from './runScenario.mjs';
 const TABLE_COUNT_SELECTOR = 'span.font-mono.text-slate-200';
 const PANE = '[data-testid="canvas-pane"]';
 const FIT_BTN = '[data-testid="fit-view-btn"]';
-const TABLES_BOUNDS = '#sqlviz-tables-bounds';
 
 async function readTransform(page) {
   return page.$eval(PANE, (el) => ({
@@ -50,7 +49,7 @@ export async function run({ page, url, timeout }) {
     (sel) => {
       const el = document.querySelector(sel);
       const s = Number(el?.dataset.canvasScale);
-      return Number.isFinite(s) && s > 0 && s < 1 && Number(el?.dataset.worldW) > 1500;
+      return Number.isFinite(s) && s > 0 && s < 1 && Number(el?.dataset.worldW) > 1200;
     },
     PANE,
     { timeout },
@@ -58,6 +57,7 @@ export async function run({ page, url, timeout }) {
   await page.waitForTimeout(250);
 
   let fittedScale = NaN;
+  let fittedPanX = NaN;
 
   results.push(
     await runScenario('initial-view-is-fitted-below-1x', async () => {
@@ -76,7 +76,29 @@ export async function run({ page, url, timeout }) {
         throw new Error(`fitted content not centered: pan (${t.panX}, ${t.panY})`);
       }
       fittedScale = t.scale;
+      fittedPanX = t.panX;
       return `initial scale ${t.scale.toFixed(3)} (raw fit ${rawFit.toFixed(3)}, world ${t.worldW}x${t.worldH})`;
+    }),
+  );
+
+  results.push(
+    await runScenario('pan-has-no-snapback', async () => {
+      // At fit scale the scaled world is only a little wider than the pane and
+      // shorter than it — the exact "letterbox" case where the old strict clamp
+      // snapped every nudge back to centre. A moderate drag must mostly stick.
+      const pane = await paneBox(page);
+      const before = await readTransform(page);
+      await dragBy(page, { x: pane.cx, y: pane.cy }, 150, 90);
+      await page.waitForTimeout(400); // longer than any clamp snap animation
+      const after = await readTransform(page);
+      const keptX = after.panX - before.panX;
+      const keptY = after.panY - before.panY;
+      if (keptX < 90 || keptY < 55) {
+        throw new Error(
+          `drag snapped back: kept (${keptX.toFixed(0)}, ${keptY.toFixed(0)}) of (150, 90) — before ${JSON.stringify(before)} after ${JSON.stringify(after)}`,
+        );
+      }
+      return `drag of (150,90) kept (${keptX.toFixed(0)}, ${keptY.toFixed(0)}) — no snap-back`;
     }),
   );
 
@@ -103,8 +125,6 @@ export async function run({ page, url, timeout }) {
 
   results.push(
     await runScenario('blank-drag-pans-without-selecting-text', async () => {
-      // now zoomed in past the fit, so content overflows the pane and panning
-      // is meaningful in both axes
       const pane = await paneBox(page);
       const before = await readTransform(page);
       await dragBy(page, { x: pane.cx, y: pane.cy }, -170, -120);
@@ -130,47 +150,51 @@ export async function run({ page, url, timeout }) {
   );
 
   results.push(
-    await runScenario('pan-is-bounded-to-bbox-plus-margin', async () => {
+    await runScenario('pan-is-bounded', async () => {
+      // Shove the same direction well past any sane content edge; the pan offset
+      // must stop advancing (a limit exists) rather than run away forever.
       const pane = await paneBox(page);
-      for (let i = 0; i < 10; i++) {
-        await dragBy(page, { x: pane.cx, y: pane.cy }, 300, 240);
-        await page.waitForTimeout(40);
+      const readings = [];
+      for (let batch = 0; batch < 4; batch++) {
+        for (let i = 0; i < 4; i++) {
+          await dragBy(page, { x: pane.cx, y: pane.cy }, 320, 260);
+          await page.waitForTimeout(40);
+        }
+        await page.waitForTimeout(200);
+        readings.push(await readTransform(page));
       }
-      await page.waitForTimeout(200);
-      const g = await page.$eval(TABLES_BOUNDS, (el) => {
-        const r = el.getBoundingClientRect();
-        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-      });
-      const intersects =
-        g.right > pane.x && g.left < pane.x + pane.w && g.bottom > pane.y && g.top < pane.y + pane.h;
-      if (!intersects) {
-        throw new Error(`tables panned fully off-screen: ${JSON.stringify(g)} vs pane ${JSON.stringify(pane)}`);
+      const a = readings[readings.length - 2];
+      const b = readings[readings.length - 1];
+      const drift = Math.abs(b.panX - a.panX) + Math.abs(b.panY - a.panY);
+      if (drift > 3) {
+        throw new Error(`pan did not settle at a bound: last two (${a.panX},${a.panY}) -> (${b.panX},${b.panY})`);
       }
-      return 'table group still intersects the viewport after extreme panning';
+      // and the world box still overlaps the viewport (never fully lost)
+      if (b.panX >= pane.w || b.panY >= pane.h) {
+        throw new Error(`world pushed entirely off screen: pan (${b.panX}, ${b.panY}) vs pane ${pane.w}x${pane.h}`);
+      }
+      return `pan bounded at (${b.panX.toFixed(0)}, ${b.panY.toFixed(0)})`;
     }),
   );
 
   results.push(
     await runScenario('fit-button-restores-fitted-view', async () => {
       const beforeFit = (await readTransform(page)).scale;
-      // move the pointer off the canvas so a stray hover-wheel can't interfere
       await page.mouse.move(4, 4);
       await page.click(FIT_BTN);
-      // wait for the fit to *settle* — the animation eases from beforeFit down
-      // to the fit scale; require it to sit within tolerance across two reads.
+      // wait for the fit to settle within tolerance across two consecutive reads
       let stableReads = 0;
-      let last = NaN;
       for (let i = 0; i < 25 && stableReads < 2; i++) {
         await page.waitForTimeout(120);
-        last = (await readTransform(page)).scale;
-        stableReads = Math.abs(last - fittedScale) < 0.03 ? stableReads + 1 : 0;
+        const s = (await readTransform(page)).scale;
+        stableReads = Math.abs(s - fittedScale) < 0.03 ? stableReads + 1 : 0;
       }
       const t = await readTransform(page);
       if (Math.abs(t.scale - fittedScale) > 0.03) {
         throw new Error(`fit scale ${t.scale} did not settle at initial fit ${fittedScale} (was ${beforeFit})`);
       }
-      if (t.panX < -1 || t.panY < -1) {
-        throw new Error(`fit did not recenter: pan (${t.panX}, ${t.panY})`);
+      if (Math.abs(t.panX - fittedPanX) > 4) {
+        throw new Error(`fit did not recenter: panX ${t.panX} vs initial ${fittedPanX}`);
       }
       return `fit: ${beforeFit.toFixed(3)} -> ${t.scale.toFixed(3)} (initial fit ${fittedScale.toFixed(3)}), recentered`;
     }),

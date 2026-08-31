@@ -60,10 +60,14 @@ export interface WorldBox {
   height: number;
 }
 
-/** Blank space (px, world units) kept around the table bounding box. The
- * pannable area is the bounding box plus this margin — react-zoom-pan-pinch's
- * `limitToBounds` then stops the pan at the SVG edge. */
-export const WORLD_MARGIN = 240;
+/** Blank space (px, world units) kept around the table bounding box, so the
+ * "Fit" view has a little breathing room and there is somewhere to pan to. */
+export const WORLD_MARGIN = 96;
+
+/** Minimum px of the world box that clampPan() keeps on screen on each axis at
+ * the pan limit. Larger than WORLD_MARGIN so at least a sliver of a real table
+ * (not just the blank margin) always stays visible. */
+export const KEEP_VISIBLE = 140;
 
 /** Minimum world size so a near-empty canvas still fills a sensible area. */
 const MIN_WORLD_W = 800;
@@ -117,22 +121,27 @@ export function computeFitTransform(
   };
 }
 
-/** Clamps a pan offset so the world box (which already includes WORLD_MARGIN)
- * cannot be dragged past the viewport: when the scaled world is larger than the
- * viewport it must keep covering it; when smaller it must stay fully inside.
- * This is what enforces Issue #17's "can't pan beyond the bounding box + margin"
- * — react-zoom-pan-pinch runs with limitToBounds disabled (its bounds forbid the
- * letterboxing that "fit all tables" needs) and Canvas.tsx re-applies this on
- * every gesture-stop instead. Pure geometry. */
+/** Clamps a pan offset so the world box can't be dragged (almost) off screen:
+ * at the limit, `keepVisible` px of the scaled world box stays inside the
+ * viewport on each axis. This is a *loose* bound — within it the view moves
+ * freely, so there is no snap-back right at the content edge — while still
+ * enforcing Issue #17's "can't pan past the bounding box + margin" (you can
+ * never lose the canvas entirely). react-zoom-pan-pinch runs with
+ * limitToBounds disabled (its bounds forbid the letterboxing that "fit all
+ * tables" needs); Canvas.tsx re-applies this on gesture-stop instead. Pure
+ * geometry. */
 export function clampPan(
   transform: { scale: number; positionX: number; positionY: number },
   viewport: { width: number; height: number },
   world: WorldBox,
+  keepVisible: number = KEEP_VISIBLE,
 ): { positionX: number; positionY: number } {
   const axis = (pos: number, content: number, view: number) => {
-    const a = Math.min(0, view - content);
-    const b = Math.max(0, view - content);
-    return Math.min(b, Math.max(a, pos));
+    const keep = Math.min(keepVisible, content, view);
+    const min = keep - content; // world's far edge stays `keep` inside the near viewport edge
+    const max = view - keep; // world's near edge stays `keep` inside the far viewport edge
+    if (min > max) return (view - content) / 2; // viewport smaller than 2*keep — just center
+    return Math.min(max, Math.max(min, pos));
   };
   return {
     positionX: axis(transform.positionX, world.width * transform.scale, viewport.width),

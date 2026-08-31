@@ -175,17 +175,26 @@ props に応じてアニメーションする。テーブルカード内部の�
 
 Issue #17 で `Canvas.tsx` は SVG を `react-zoom-pan-pinch` の
 `<TransformWrapper>`/`<TransformComponent>` でラップし、キャンバスのパン・
-ズームと「全テーブルにフィット」ボタン（`data-testid="fit-view-btn"`、
-`zoomToElement('#sqlviz-tables-bounds')`）を持つ。SVG は `width/height` に
-`lib/canvasLayout.ts` の `computeWorldBox()`（全テーブル外接矩形 +
-`WORLD_MARGIN`、最小 800×500）の実ピクセルサイズを持ち、`limitToBounds` で
-そのワールドボックス外へはパンできない。ジェスチャーはライブラリがラッパー
-`<div>` への CSS transform だけで処理するため SVG/テーブル木は再レンダリング
-されない。現在の transform は `onTransform` で `CanvasPane` の
-`<section data-testid="canvas-pane">` に `data-canvas-scale` /
-`data-canvas-pan-x` / `data-canvas-pan-y` / `data-world-w` / `data-world-h`
+ズームと「全テーブルにフィット」ボタン（`data-testid="fit-view-btn"`）を持つ。
+SVG は `width/height` に `lib/canvasLayout.ts` の `computeWorldBox()`
+（全テーブル外接矩形 + `WORLD_MARGIN`、最小 800×500）の実ピクセルサイズを持つ。
+ジェスチャーはライブラリがラッパー `<div>` への CSS transform だけで処理する
+ため SVG/テーブル木は再レンダリングされない。現在の transform は `onTransform`
+で `CanvasPane` の `<section data-testid="canvas-pane">` に `data-canvas-scale`
+/ `data-canvas-pan-x` / `data-canvas-pan-y` / `data-world-w` / `data-world-h`
 として命令的に公開される（`setState` しない＝再レンダリングを起こさない。
 `tools/acceptance-check/scenarios/phaseB-panzoom.mjs` の検証に使う）。
+
+フィット／パン制限の挙動（Issue #17 レビュー反映）：フィットは
+`computeFitTransform()`（純粋幾何）を `setTransform()` に渡す方式で、初期の
+自動フィットと Fit ボタンで共有する。**自動フィットは起動時ストリーミング
+ロード追従のみ**——ワールドサイズが変化しなくなって約1.2秒、あるいは最初の
+手動パン/ズームで恒久停止し、以後の再フレーミングは Fit ボタン限定
+（SQL を再実行してもカメラは動かない）。`limitToBounds` は無効化し
+（「内容がビューポートを覆う」規則がフィット時のレターボックス表示を妨げるため）、
+代わりにジェスチャー終了時に `clampPan()`（`KEEP_VISIBLE` 分だけワールドを
+画面内に残す緩い制限）を再適用する。ホイールズームは `smooth` 無効・離散
+ステップ（`smooth` はホイール deltaY を乗算し1ノッチで過剰にズームするため）。
 
 SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`、`ALTER TABLE`
 の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`
