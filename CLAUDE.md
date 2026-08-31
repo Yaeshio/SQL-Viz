@@ -123,9 +123,12 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    `experiment` モードでしか作れずモード復帰のたびに必ずロールバックされる
    ため、行データがモード遷移をまたいで永続化される経路はスコープ上
    存在しない（永続化されるのはテーブル構造のみ）。
-7. `layout.ts` — `layoutTables()` が、キャンバスの現在のピクセル幅を
-   基準に各テーブルへグリッド状の `x`/`y` を割り当てる（収まらなければ
-   次の行に折り返す）。PGlite 導入による変更なし。
+7. `layout.ts` — `layoutTables()` が各テーブルへグリッド状の `x`/`y` を
+   割り当てる（収まらなければ次の行に折り返す）。折り返し幅は Issue #17 以降
+   ビューポート幅ではなく固定定数 `WORLD_W`（ワールド座標系。5列グリッド）で、
+   ブラウザ（`useSqlRunner.ts`）とクエリAPIサーバー（`local/queryApiPlugin.ts`）の
+   両方が同じ値を渡すため配置は決定的。`layoutTables()` のシグネチャ自体は
+   `(state, wrapWidth)` のまま。
 8. `diff.ts` — `diffStates(old, next)` が変更前後の `DBState` を比較し、
    順序付きの `AnimationEvent[]` を生成する（新規テーブル → 削除テーブル
    → カラム追加/削除 → 新規行 → 削除行 → 値更新 → フィルタ/解除の変化 →
@@ -165,10 +168,24 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
 データ行1件分は `components/canvas/TableRow.tsx` に切り出されている。
 `App` から渡される `appearingRows` / `filteringRows` / `highlight` の
 props に応じてアニメーションする。テーブルカード内部の列/行の y オフ
-セット・セル文字列の切り詰め・SVG viewBox の計算は `lib/canvasLayout.ts`
+セット・セル文字列の切り詰めは `lib/canvasLayout.ts`
 （`layout.ts` とは別の、テーブル**内部**描画専用の純粋関数群）が担う。
 `layout.ts` は引き続きテーブル**同士**のグリッド配置（`TABLE_W`,
 `HEADER_H`, `ROW_H`, `COL_GAP` 等の定数を含む）専用。
+
+Issue #17 で `Canvas.tsx` は SVG を `react-zoom-pan-pinch` の
+`<TransformWrapper>`/`<TransformComponent>` でラップし、キャンバスのパン・
+ズームと「全テーブルにフィット」ボタン（`data-testid="fit-view-btn"`、
+`zoomToElement('#sqlviz-tables-bounds')`）を持つ。SVG は `width/height` に
+`lib/canvasLayout.ts` の `computeWorldBox()`（全テーブル外接矩形 +
+`WORLD_MARGIN`、最小 800×500）の実ピクセルサイズを持ち、`limitToBounds` で
+そのワールドボックス外へはパンできない。ジェスチャーはライブラリがラッパー
+`<div>` への CSS transform だけで処理するため SVG/テーブル木は再レンダリング
+されない。現在の transform は `onTransform` で `CanvasPane` の
+`<section data-testid="canvas-pane">` に `data-canvas-scale` /
+`data-canvas-pan-x` / `data-canvas-pan-y` / `data-world-w` / `data-world-h`
+として命令的に公開される（`setState` しない＝再レンダリングを起こさない。
+`tools/acceptance-check/scenarios/phaseB-panzoom.mjs` の検証に使う）。
 
 SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`、`ALTER TABLE`
 の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`

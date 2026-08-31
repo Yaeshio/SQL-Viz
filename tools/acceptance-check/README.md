@@ -60,13 +60,36 @@ node tools/acceptance-check/orchestrate-phase-a.mjs
 最終的に `{"phase": "A", "scenarios": [...], "ok": true}` 形式のJSONを標準出力に出し、
 `ok` が `false` の場合は非ゼロで終了する。
 
+## 使い方（Phase B: キャンバスのパン・ズーム、Issue #17）
+
+```bash
+# イメージビルドまでは Phase A と同じ
+node tools/acceptance-check/orchestrate-phase-b.mjs
+```
+
+`orchestrate-phase-b.mjs` は Phase A より単純で、devサーバーを1つだけ起動する：
+
+1. `os.tmpdir()` 配下の使い捨てディレクトリに
+   `fixtures/phaseB-panzoom-schema.sql`（Playwrightのビューポートより大きな
+   ワールドボックスになるよう十数個の `CREATE TABLE` を含む）をコピーする。
+2. そのファイルを指す実の `sql-studio` dev サーバーを `spawnVite()` で起動
+   （アプリが起動時サイレント自動ロードでキャンバスを描く）。
+3. `sql-viz-acceptance-check` コンテナ（`--phase=B-panzoom`）を実行し、実Chromiumで
+   ホイールズーム・空白ドラッグによるパン・Fitボタンを操作して、`Canvas.tsx` が
+   公開する `data-*` 属性（`data-canvas-scale` / `-pan-x` / `-pan-y` /
+   `data-world-w` / `-world-h`）でpass/failを判定する。検証項目は
+   「初期表示が全テーブルにフィット（scale<1）」「ホイールで拡大」
+   「Fitボタンで初期倍率へ復帰」「ドラッグでパンしテキスト選択は誤発火しない」
+   「限界までパンしてもテーブル群が画面外に出ない（`limitToBounds`）」。
+4. devサーバーを停止し、一時ディレクトリを削除。`{"phase": "B", ..., "ok": bool}` を出力。
+
 ## `run.mjs`（コンテナ側エントリポイント）のCLIオプション
 
 `orchestrate-phase-a.mjs` から内部的に呼ばれるが、単体でも実行できる。
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` |
+| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` |
 | `--url` | なし（必須） | 対象のsql-studio dev serverのURL |
 | `--schema` | なし（必須） | コンテナ内から見えるスキーマファイルのパス（bind mount先、例: `/workspace/schema.sql`） |
 | `--save-dir` | なし | `A-verify` 専用。検証モードの別名保存先（bind mount先、例: `/workspace/verify-saves`） |
@@ -80,8 +103,10 @@ node tools/acceptance-check/orchestrate-phase-a.mjs
 
 ## 今後の拡張
 
-- Phase B（`#17`/`#34`、キャンバスのパン・ズーム・ドラッグ）向けの
-  `scenarios/phaseB*.mjs` は、それらのissueの未決事項（UI仕様）が固まった後に追加する。
+- Phase B のうち **`#17`（パン・ズーム + Fit）分は `scenarios/phaseB-panzoom.mjs`
+  として実装済み**（`#17` 本体に未決事項が無いため `#34` を待たず先行、Issue #17
+  コメントの整理に従う）。テーブルのドラッグ移動（`#34`）とその未決事項
+  （リサイズ時の再配置要否）に関わるシナリオは、`#34` 着手時に別モジュールで追加する。
 - Phase A自体（`#27`/`#31`/`#32`/`#33`）が実装されたら、`orchestrate-phase-a.mjs` の
   `spawnVite()` 直接呼び出しは、`#31` で追加される Docker 化された sql-studio
   （`docker run ... sql-studio /workspace/schema.sql`）への差し替えを検討する
