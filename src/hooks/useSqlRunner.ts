@@ -50,6 +50,11 @@ export interface UseSqlRunnerResult {
   run: (options?: RunOptions) => Promise<void>;
   reset: () => void;
   getDb: () => PGlite | null;
+  /** Commits a drag (Issue #34): marks the table manuallyPositioned at the
+   * given world coordinates via PgEngine.setTablePosition() (so the position
+   * survives the next run()) and updates state immediately, with no
+   * animation/diff involved — repositioning is its own visual feedback. */
+  moveTable: (name: string, x: number, y: number) => void;
 }
 
 /** Owns SQL editor input, DBState, execution log/error/playing flags, and
@@ -167,6 +172,11 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
 
   const getDb = useCallback(() => engineRef.current?.getDb() ?? null, []);
 
+  const moveTable = useCallback((name: string, x: number, y: number) => {
+    const next = engineRef.current!.setTablePosition(name, x, y);
+    dispatch({ type: 'set', state: next });
+  }, []);
+
   return {
     sql,
     setSql,
@@ -186,5 +196,6 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     run,
     reset,
     getDb,
+    moveTable,
   };
 }

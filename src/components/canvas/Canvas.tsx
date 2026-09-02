@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from 'react';
-import type { RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Maximize } from 'lucide-react';
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
@@ -32,6 +32,8 @@ interface Props {
   appearingColumns: Set<string>;
   /** table currently highlighted by SELECT, plus its projected columns */
   highlight: CanvasHighlight | null;
+  /** Commits a completed table drag (Issue #34) at final world coordinates. */
+  onMoveTable: (name: string, x: number, y: number) => void;
 }
 
 export default function Canvas({
@@ -42,12 +44,17 @@ export default function Canvas({
   updatingRows,
   appearingColumns,
   highlight,
+  onMoveTable,
 }: Props) {
   const tables = state.order.map((n) => state.tables[n]);
   const world = computeWorldBox(tables);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const worldRef = useRef(world);
   worldRef.current = world;
+  // current canvas zoom, kept in sync by publishTransform below — read (not
+  // subscribed to) when converting a drag's screen-px delta into world units,
+  // so table-drag re-renders stay scoped to the dragged TableNode only.
+  const scaleRef = useRef(1);
   // false until the user pans/zooms by hand — while false, the view auto-fits
   // as the world box grows (the startup load streams tables in one at a time).
   const interactedRef = useRef(false);
@@ -60,6 +67,7 @@ export default function Canvas({
   // transform on its wrapper. Read by tools/acceptance-check/scenarios/phaseB*.
   const publishTransform = useCallback(
     (s: { scale: number; positionX: number; positionY: number }) => {
+      scaleRef.current = s.scale;
       const el = paneRef.current;
       if (!el) return;
       el.dataset.canvasScale = String(s.scale);
@@ -132,6 +140,56 @@ export default function Canvas({
     interactedRef.current = true;
   }, []);
 
+  // Table drag (Issue #34). Only the header (class "sqlviz-drag-handle",
+  // excluded from panning below) reports pointerdown, so this never fights
+  // the canvas pan gesture. Live offset lives in local state; the underlying
+  // DBState (and PgEngine's copy of it) is only touched once, on pointerup,
+  // via onMoveTable.
+  const [draggingName, setDraggingName] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
+  const dragOriginRef = useRef<{ name: string; startClientX: number; startClientY: number } | null>(null);
+
+  const handleHeaderPointerDown = useCallback(
+    (e: ReactPointerEvent, name: string) => {
+      markInteracted();
+      dragOriginRef.current = { name, startClientX: e.clientX, startClientY: e.clientY };
+      setDragOffset({ dx: 0, dy: 0 });
+      setDraggingName(name);
+    },
+    [markInteracted],
+  );
+
+  useEffect(() => {
+    if (!draggingName) return;
+
+    const offsetFor = (e: PointerEvent) => {
+      const origin = dragOriginRef.current;
+      const scale = scaleRef.current || 1;
+      if (!origin) return { dx: 0, dy: 0 };
+      return { dx: (e.clientX - origin.startClientX) / scale, dy: (e.clientY - origin.startClientY) / scale };
+    };
+
+    const handleMove = (e: PointerEvent) => setDragOffset(offsetFor(e));
+
+    const handleUp = (e: PointerEvent) => {
+      const origin = dragOriginRef.current;
+      const { dx, dy } = offsetFor(e);
+      dragOriginRef.current = null;
+      setDraggingName(null);
+      if (!origin) return;
+      const table = state.tables[origin.name];
+      if (!table) return;
+      onMoveTable(origin.name, Math.max(0, table.x + dx), Math.max(0, table.y + dy));
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+  }, [draggingName, state, onMoveTable]);
+
   // limitToBounds is off (its "content must cover the viewport" rule forbids the
   // letterboxing that fit-all-tables needs), so re-apply our own world-box pan
   // limit when a gesture ends — overshoot during the drag snaps back into range.
@@ -163,7 +221,12 @@ export default function Canvas({
         smooth={false}
         wheel={{ step: 0.2 }}
         doubleClick={{ disabled: true }}
-        panning={{ velocityDisabled: true }}
+        // Issue #34: table headers carry the "sqlviz-drag-handle" class so
+        // react-zoom-pan-pinch's own pan gesture (which listens for
+        // "mousedown" on `window`, independent of React's event tree — see
+        // TableNode.tsx) skips itself when the pointerdown originated there,
+        // instead of fighting a table drag.
+        panning={{ velocityDisabled: true, excluded: ['sqlviz-drag-handle'] }}
         onPanningStart={markInteracted}
         onWheelStart={markInteracted}
         onPinchStart={markInteracted}
@@ -199,6 +262,9 @@ export default function Canvas({
                     updatingRows={updatingRows}
                     appearingColumns={appearingColumns}
                     highlight={highlight}
+                    onHeaderPointerDown={handleHeaderPointerDown}
+                    isDragging={draggingName === t.name}
+                    dragOffset={draggingName === t.name ? dragOffset : undefined}
                   />
                 ))}
               </AnimatePresence>

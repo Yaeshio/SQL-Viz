@@ -8,6 +8,12 @@ function tableWithShape(name: string, columnCount: number, rowCount: number) {
   return makeTable(name, columns, rows);
 }
 
+function pinnedTableWithShape(name: string, columnCount: number, rowCount: number, x: number, y: number) {
+  const columns = Array.from({ length: columnCount }, (_, i) => makeColumn(`c${i}`, 'INT'));
+  const rows = Array.from({ length: rowCount }, (_, i) => makeRow(`r${i}`, { id: i }));
+  return makeTable(name, columns, rows, x, y, true);
+}
+
 describe('layoutTables — 列数と折り返し（非immutableな関数）', () => {
   it('LAYOUT-COLS-01: 全テーブルが1行に収まる十分な canvasW では横一列に並ぶ', () => {
     const state = makeState([
@@ -123,6 +129,62 @@ describe('WORLD_W — ワールド座標系の固定折り返し幅（Issue #17�
       expect(a.tables[name].x).toBe(b.tables[name].x);
       expect(a.tables[name].y).toBe(b.tables[name].y);
     }
+  });
+});
+
+describe('layoutTables — 手動配置テーブルの除外と衝突回避（Issue #34）', () => {
+  it('LAYOUT-MANUAL-01: manuallyPositioned なテーブルの x/y は layoutTables() 後も不変', () => {
+    const state = makeState(
+      [tableWithShape('t0', 1, 0), pinnedTableWithShape('pinned', 1, 0, 777, 888), tableWithShape('t1', 1, 0)],
+      ['t0', 'pinned', 't1'],
+    );
+    layoutTables(state, 650);
+
+    expect(state.tables.pinned.x).toBe(777);
+    expect(state.tables.pinned.y).toBe(888);
+  });
+
+  it('LAYOUT-MANUAL-02: 自動配置テーブルは手動配置テーブル分の空き枠を作らず、order内の自動配置テーブルだけで詰めて配置される', () => {
+    const state = makeState(
+      [tableWithShape('t0', 1, 0), pinnedTableWithShape('pinned', 1, 0, 777, 888), tableWithShape('t1', 1, 0)],
+      ['t0', 'pinned', 't1'],
+    );
+    const canvasW = 650; // cols = 2
+    layoutTables(state, canvasW);
+
+    // pinned が order の2番目でも、t1 は自動配置テーブルの中での2番目（index 1）
+    // として col1/row0 に詰まる（もし手動配置テーブル分の枠を予約してしまうと
+    // t1 は index 2 扱いで col0/row1 に折り返されてしまう）。
+    expect(state.tables.t1.x).toBe(PAD + (TABLE_W + TABLE_GAP_X));
+    expect(state.tables.t1.y).toBe(PAD);
+  });
+
+  it('LAYOUT-MANUAL-03: 自動配置テーブルの候補セルが手動配置テーブルの実座標と重なる場合、下へ押し出されて重ならない', () => {
+    // pinned をちょうど t0 の唯一の候補セル（col0/row0 = (PAD, PAD)）に置く。
+    const pinned = pinnedTableWithShape('pinned', 1, 0, PAD, PAD);
+    const auto = tableWithShape('t0', 1, 0);
+    const state = makeState([pinned, auto], ['pinned', 't0']);
+    const canvasW = 900; // cols は十分大きいので t0 の候補は常に col0/row0
+
+    layoutTables(state, canvasW);
+
+    const h = TABLE_H(state.tables.t0);
+    expect(state.tables.pinned.x).toBe(PAD);
+    expect(state.tables.pinned.y).toBe(PAD);
+    // 列はそのまま、pinned と重ならなくなるまで行だけ下へ押し出される
+    expect(state.tables.t0.x).toBe(PAD);
+    expect(state.tables.t0.y).toBe(PAD + TABLE_GAP_Y + h);
+  });
+
+  it('LAYOUT-MANUAL-04: 手動配置テーブルが1つもなければ衝突回避パスは発動せず、既存のグリッド計算と出力が一致する', () => {
+    const state = makeState([tableWithShape('t0', 1, 0), tableWithShape('t1', 1, 0), tableWithShape('t2', 1, 0)]);
+    const canvasW = 650; // cols = 2
+    layoutTables(state, canvasW);
+
+    expect(state.tables.t0.x).toBe(PAD);
+    expect(state.tables.t1.x).toBe(PAD + (TABLE_W + TABLE_GAP_X));
+    expect(state.tables.t2.x).toBe(PAD);
+    expect(state.tables.t2.y).toBe(PAD + (TABLE_H(state.tables.t0) + TABLE_GAP_Y));
   });
 });
 

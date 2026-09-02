@@ -30,6 +30,7 @@ export default function App() {
     run,
     reset,
     getDb,
+    moveTable,
   } = useSqlRunner(SAMPLE, mode);
 
   const localSync = useLocalSync();
@@ -122,6 +123,7 @@ export default function App() {
           updatingRows={updatingRows}
           appearingColumns={appearingColumns}
           highlight={highlight}
+          onMoveTable={moveTable}
         />
       </div>
     </div>

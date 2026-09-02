@@ -15,12 +15,41 @@ export const PAD = 24;
  * 5-column grid: floor((WORLD_W - PAD) / (TABLE_W + TABLE_GAP_X)) === 5. */
 export const WORLD_W = 1680;
 
-/** Assign x/y positions to tables in a flowing grid. */
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** AABB overlap test, inflated by half the standard table gaps so an
+ * auto-placed table keeps its usual breathing room around an obstacle
+ * instead of merely not touching it. */
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  const mx = TABLE_GAP_X / 2;
+  const my = TABLE_GAP_Y / 2;
+  return a.x < b.x + b.w + mx && a.x + a.w + mx > b.x && a.y < b.y + b.h + my && a.y + a.h + my > b.y;
+}
+
+/**
+ * Assign x/y positions to tables in a flowing grid. Tables flagged
+ * `manuallyPositioned` (Issue #34 — user has dragged them) are left
+ * untouched and excluded from the grid computation entirely; the remaining
+ * (auto) tables, including newly created ones, tighten around the gap they'd
+ * otherwise leave. Each auto table's grid candidate is then nudged straight
+ * down, one table at a time in `state.order` order, until it no longer
+ * overlaps any manually-positioned table or any auto table already placed
+ * earlier in this same pass — so a new table never spawns on top of a table
+ * the user has dragged off-grid. With no manually-positioned tables present
+ * this nudge never triggers, so output is unchanged from before Issue #34.
+ */
 export function layoutTables(state: DBState, canvasW: number): DBState {
   const cols = Math.max(1, Math.floor((canvasW - PAD) / (TABLE_W + TABLE_GAP_X)));
-  const rowCount = Math.ceil(state.order.length / cols);
+  const autoNames = state.order.filter((name) => !state.tables[name].manuallyPositioned);
+
+  const rowCount = Math.ceil(autoNames.length / cols);
   const rowHeights = new Array(rowCount).fill(0);
-  state.order.forEach((name, i) => {
+  autoNames.forEach((name, i) => {
     const row = Math.floor(i / cols);
     rowHeights[row] = Math.max(rowHeights[row], TABLE_H(state.tables[name]));
   });
@@ -30,12 +59,27 @@ export function layoutTables(state: DBState, canvasW: number): DBState {
     rowY[r] = acc;
     acc += rowHeights[r] + TABLE_GAP_Y;
   }
-  state.order.forEach((name, i) => {
+
+  const obstacles: Rect[] = state.order
+    .filter((name) => state.tables[name].manuallyPositioned)
+    .map((name) => {
+      const t = state.tables[name];
+      return { x: t.x, y: t.y, w: TABLE_W, h: TABLE_H(t) };
+    });
+
+  autoNames.forEach((name, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    state.tables[name].x = PAD + col * (TABLE_W + TABLE_GAP_X);
-    state.tables[name].y = rowY[row];
+    const h = TABLE_H(state.tables[name]);
+    const rect: Rect = { x: PAD + col * (TABLE_W + TABLE_GAP_X), y: rowY[row], w: TABLE_W, h };
+    while (obstacles.some((o) => rectsOverlap(rect, o))) {
+      rect.y += TABLE_GAP_Y + h;
+    }
+    state.tables[name].x = rect.x;
+    state.tables[name].y = rect.y;
+    obstacles.push(rect);
   });
+
   return state;
 }
 

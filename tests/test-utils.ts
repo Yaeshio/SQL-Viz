@@ -16,8 +16,15 @@ export function makeRow(id: string, values: Row['values'], filteredOut?: boolean
   return filteredOut === undefined ? { id, values } : { id, values, filteredOut };
 }
 
-export function makeTable(name: string, columns: Column[], rows: Row[], x = 0, y = 0): Table {
-  return { name, columns, rows, x, y };
+export function makeTable(
+  name: string,
+  columns: Column[],
+  rows: Row[],
+  x = 0,
+  y = 0,
+  manuallyPositioned?: boolean,
+): Table {
+  return manuallyPositioned === undefined ? { name, columns, rows, x, y } : { name, columns, rows, x, y, manuallyPositioned };
 }
 
 export function makeState(tables: Table[], order?: string[], lastSelect: DBState['lastSelect'] = null): DBState {

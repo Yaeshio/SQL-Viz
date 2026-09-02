@@ -106,6 +106,38 @@ export class PgEngine {
     return this.lastState;
   }
 
+  /**
+   * Records a user drag (Issue #34): marks a table manuallyPositioned at the
+   * given world coordinates and writes the result into `this.lastState`, the
+   * same internal snapshot `run()` clones from as `current` on the next
+   * call. Without this, a drag would only ever reach the browser's own
+   * DBState copy and get silently discarded by layoutTables() on the very
+   * next statement. Also mirrors the change into `designCheckpoint.lastState`
+   * when one is open, so a later experiment→design returnToDesign() ROLLBACK
+   * (which only undoes data changes) doesn't also revert the drag back to
+   * wherever the table was when experiment mode began. No-ops if the table
+   * doesn't exist (e.g. dropped mid-drag).
+   */
+  setTablePosition(name: string, x: number, y: number): DBState {
+    if (!this.lastState.tables[name]) return this.lastState;
+    const next = cloneState(this.lastState);
+    next.tables[name] = { ...next.tables[name], x, y, manuallyPositioned: true };
+    this.lastState = next;
+
+    if (this.designCheckpoint?.lastState.tables[name]) {
+      const checkpointState = this.designCheckpoint.lastState;
+      this.designCheckpoint.lastState = {
+        ...checkpointState,
+        tables: {
+          ...checkpointState.tables,
+          [name]: { ...checkpointState.tables[name], x, y, manuallyPositioned: true },
+        },
+      };
+    }
+
+    return next;
+  }
+
   ensureReady(): Promise<void> {
     if (!this.readyPromise) {
       this.readyPromise = (async () => {
