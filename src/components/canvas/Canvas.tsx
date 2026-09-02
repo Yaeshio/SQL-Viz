@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Maximize } from 'lucide-react';
@@ -105,6 +105,31 @@ export default function Canvas({
     // purely-vertical drag near the origin only moves minY/height), so all
     // four are listed explicitly rather than relying on width/height alone.
   }, [paneRef, world.width, world.height, world.minX, world.minY]);
+
+  // World-origin drag compensation (Issue #34 follow-up). While a table is
+  // dragged toward the left/top edge it *becomes* the left/top-most table, so
+  // computeWorldBox()'s minX/minY (and thus the SVG viewBox origin) track it
+  // 1:1. react-zoom-pan-pinch's pan transform is frozen during a header drag
+  // (the header is excluded from the pan gesture), so nothing absorbs that
+  // origin shift and the dragged table looks pinned while every *other* table
+  // slides the opposite way. Right/bottom drags don't hit this because minX/minY
+  // don't move there. Fix: whenever the origin shifts mid-drag, shift the pan
+  // transform by the same amount (× scale) with no animation, so a world point
+  // that isn't moving stays put on screen — screen(wx) = positionX + (wx -
+  // minX)·scale, so positionX must gain (minX_new - minX_old)·scale. useLayout-
+  // Effect so it lands in the same frame as the viewBox change (no flicker).
+  const prevWorldOriginRef = useRef({ minX: world.minX, minY: world.minY });
+  useLayoutEffect(() => {
+    const prev = prevWorldOriginRef.current;
+    prevWorldOriginRef.current = { minX: world.minX, minY: world.minY };
+    const api = transformRef.current;
+    if (!draggingName || !api) return;
+    const dMinX = world.minX - prev.minX;
+    const dMinY = world.minY - prev.minY;
+    if (dMinX === 0 && dMinY === 0) return;
+    const { scale, positionX, positionY } = api.state;
+    api.setTransform(positionX + dMinX * scale, positionY + dMinY * scale, scale, 0);
+  }, [draggingName, world.minX, world.minY]);
 
   // Fit = center the world box in the pane, scaled to sit within FIT_PADDING of
   // every edge. Pure geometry (computeFitTransform) driven by the pane's own
