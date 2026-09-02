@@ -46,8 +46,25 @@ export default function Canvas({
   highlight,
   onMoveTable,
 }: Props) {
+  // Table drag (Issue #34) — declared before `world` below so a live drag
+  // can feed into it (see worldTables). Only the header (class
+  // "sqlviz-drag-handle", excluded from panning below) reports pointerdown,
+  // so this never fights the canvas pan gesture. Live offset lives here in
+  // local state; the underlying DBState (and PgEngine's copy of it) is only
+  // touched once, on pointerup, via onMoveTable.
+  const [draggingName, setDraggingName] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
+
   const tables = state.order.map((n) => state.tables[n]);
-  const world = computeWorldBox(tables);
+  // Feeds the *live* dragged position into the world-box calculation (not
+  // just the last-committed state), so the canvas grows proactively as a
+  // table approaches an edge instead of only after the drag is dropped.
+  // `tables` itself (passed to <TableNode> below) stays untouched so memo()
+  // still skips re-rendering every table but the one being dragged.
+  const worldTables = draggingName
+    ? tables.map((t) => (t.name === draggingName ? { ...t, x: t.x + dragOffset.dx, y: t.y + dragOffset.dy } : t))
+    : tables;
+  const world = computeWorldBox(worldTables);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const worldRef = useRef(world);
   worldRef.current = world;
@@ -82,7 +99,12 @@ export default function Canvas({
     if (!el) return;
     el.dataset.worldW = String(world.width);
     el.dataset.worldH = String(world.height);
-  }, [paneRef, world.width, world.height]);
+    el.dataset.worldMinX = String(world.minX);
+    el.dataset.worldMinY = String(world.minY);
+    // minX/minY don't necessarily change together with width/height (e.g. a
+    // purely-vertical drag near the origin only moves minY/height), so all
+    // four are listed explicitly rather than relying on width/height alone.
+  }, [paneRef, world.width, world.height, world.minX, world.minY]);
 
   // Fit = center the world box in the pane, scaled to sit within FIT_PADDING of
   // every edge. Pure geometry (computeFitTransform) driven by the pane's own
@@ -140,13 +162,7 @@ export default function Canvas({
     interactedRef.current = true;
   }, []);
 
-  // Table drag (Issue #34). Only the header (class "sqlviz-drag-handle",
-  // excluded from panning below) reports pointerdown, so this never fights
-  // the canvas pan gesture. Live offset lives in local state; the underlying
-  // DBState (and PgEngine's copy of it) is only touched once, on pointerup,
-  // via onMoveTable.
-  const [draggingName, setDraggingName] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
+  // draggingName/dragOffset state itself is declared above, before `world`.
   const dragOriginRef = useRef<{ name: string; startClientX: number; startClientY: number } | null>(null);
 
   const handleHeaderPointerDown = useCallback(
@@ -179,7 +195,7 @@ export default function Canvas({
       if (!origin) return;
       const table = state.tables[origin.name];
       if (!table) return;
-      onMoveTable(origin.name, Math.max(0, table.x + dx), Math.max(0, table.y + dy));
+      onMoveTable(origin.name, table.x + dx, table.y + dy);
     };
 
     window.addEventListener('pointermove', handleMove);
@@ -242,7 +258,7 @@ export default function Canvas({
           <svg
             width={world.width}
             height={world.height}
-            viewBox={`0 0 ${world.width} ${world.height}`}
+            viewBox={`${world.minX} ${world.minY} ${world.width} ${world.height}`}
             className="block"
           >
             <defs>
@@ -250,7 +266,7 @@ export default function Canvas({
                 <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#1e293b" strokeWidth={0.5} />
               </pattern>
             </defs>
-            <rect width={world.width} height={world.height} fill="url(#grid)" />
+            <rect x={world.minX} y={world.minY} width={world.width} height={world.height} fill="url(#grid)" />
             <g id={TABLES_BOUNDS_ID}>
               <AnimatePresence>
                 {tables.map((t) => (

@@ -24,6 +24,15 @@ async function readTablePos(page, name) {
   return page.$eval(tableNodeSelector(name), (el) => ({ x: Number(el.dataset.x), y: Number(el.dataset.y) }));
 }
 
+async function readWorldBox(page) {
+  return page.$eval(PANE, (el) => ({
+    minX: Number(el.dataset.worldMinX),
+    minY: Number(el.dataset.worldMinY),
+    width: Number(el.dataset.worldW),
+    height: Number(el.dataset.worldH),
+  }));
+}
+
 async function dragHandleBy(page, name, dx, dy) {
   const box = await page.locator(dragHandleSelector(name)).boundingBox();
   const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -132,6 +141,35 @@ export async function run({ page, url, timeout }) {
       if (overlaps) throw new Error('newly created t2 overlaps the dragged t0');
 
       return `t0 stayed at (${t0After.x.toFixed(0)}, ${t0After.y.toFixed(0)}), new t2 does not overlap it`;
+    }),
+  );
+
+  results.push(
+    await runScenario('drag-past-the-origin-grows-the-canvas-left-and-up', async () => {
+      const worldBefore = await readWorldBox(page);
+      const t2Before = await readTablePos(page, 't2');
+      await dragHandleBy(page, 't2', -(t2Before.x + 400), -(t2Before.y + 300));
+      await page.waitForTimeout(300);
+      const t2After = await readTablePos(page, 't2');
+      const worldAfter = await readWorldBox(page);
+
+      if (t2After.x >= 0 || t2After.y >= 0) {
+        throw new Error(
+          `dragging past the origin was clamped back to non-negative: before ${JSON.stringify(t2Before)} after ${JSON.stringify(t2After)}`,
+        );
+      }
+      if (worldAfter.minX >= worldBefore.minX || worldAfter.minY >= worldBefore.minY) {
+        throw new Error(
+          `world box did not extend left/up: before ${JSON.stringify(worldBefore)} after ${JSON.stringify(worldAfter)}`,
+        );
+      }
+      if (worldAfter.minX > t2After.x || worldAfter.minY > t2After.y) {
+        throw new Error(
+          `world box does not actually contain the dragged table: table ${JSON.stringify(t2After)} world ${JSON.stringify(worldAfter)}`,
+        );
+      }
+
+      return `t2 dragged to (${t2After.x.toFixed(0)}, ${t2After.y.toFixed(0)}), world box now starts at (${worldAfter.minX.toFixed(0)}, ${worldAfter.minY.toFixed(0)})`;
     }),
   );
 
