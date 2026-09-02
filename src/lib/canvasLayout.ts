@@ -56,6 +56,12 @@ export function computeRowCells(columns: Column[], row: Row): RowCellLayout[] {
 }
 
 export interface WorldBox {
+  /** world-space x/y of the box's top-left corner. Exactly 0 unless a
+   * manually-positioned table (Issue #34 drag) sits left of/above the
+   * origin, in which case it's negative — the SVG viewBox is offset to
+   * match so the canvas can grow left/up as well as right/down. */
+  minX: number;
+  minY: number;
   width: number;
   height: number;
 }
@@ -73,16 +79,31 @@ export const KEEP_VISIBLE = 140;
 const MIN_WORLD_W = 800;
 const MIN_WORLD_H = 500;
 
-/** Computes the world-space size (the SVG's pixel width/height) that encloses
- * every table's real card rectangle plus `margin` of blank space, clamped to a
- * minimum. Pure geometry — the pan/zoom transform is applied on top of this by
+/** Computes the world-space box (the SVG's pixel width/height, plus a
+ * top-left origin) that tightly wraps every table's real card rectangle with
+ * `margin` of blank space on all four sides, clamped to a minimum size.
+ * Deliberately does NOT special-case the world origin (0,0) as an implicit
+ * lower bound — every edge (left/top as much as right/bottom) is computed
+ * the same way, purely from the tables' own current positions, so a table
+ * dragged toward any edge (Issue #34) gets the same continuous, proactive
+ * `margin`-px cushion in every direction instead of only right/down. Pure
+ * geometry — the pan/zoom transform is applied on top of this by
  * Canvas.tsx. */
 export function computeWorldBox(tables: Table[], margin: number = WORLD_MARGIN): WorldBox {
-  const maxX = Math.max(0, ...tables.map((t) => t.x + TABLE_W));
-  const maxY = Math.max(0, ...tables.map((t) => t.y + TABLE_H(t)));
+  if (tables.length === 0) {
+    return { minX: 0, minY: 0, width: MIN_WORLD_W, height: MIN_WORLD_H };
+  }
+  const left = Math.min(...tables.map((t) => t.x));
+  const right = Math.max(...tables.map((t) => t.x + TABLE_W));
+  const top = Math.min(...tables.map((t) => t.y));
+  const bottom = Math.max(...tables.map((t) => t.y + TABLE_H(t)));
+  const minX = left - margin;
+  const minY = top - margin;
   return {
-    width: Math.max(maxX + margin, MIN_WORLD_W),
-    height: Math.max(maxY + margin, MIN_WORLD_H),
+    minX,
+    minY,
+    width: Math.max(right - left + margin * 2, MIN_WORLD_W),
+    height: Math.max(bottom - top + margin * 2, MIN_WORLD_H),
   };
 }
 

@@ -15,7 +15,7 @@ const { values } = parseArgs({
 
 if (!values.phase || !values.url || !values.schema) {
   process.stderr.write(
-    'Usage: node run.mjs --phase=<A-initial|A-restart|A-verify|B-panzoom> --url=<http://host:port/> --schema=</workspace/schema.sql> [--save-dir=</workspace/verify-saves>] [--out=<path>] [--timeout=15000]\n',
+    'Usage: node run.mjs --phase=<A-initial|A-restart|A-verify|B-panzoom|B-drag> --url=<http://host:port/> --schema=</workspace/schema.sql> [--save-dir=</workspace/verify-saves>] [--out=<path>] [--timeout=15000]\n',
   );
   process.exit(2);
 }

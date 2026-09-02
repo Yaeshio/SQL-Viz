@@ -196,6 +196,97 @@ SVG は `width/height` に `lib/canvasLayout.ts` の `computeWorldBox()`
 画面内に残す緩い制限）を再適用する。ホイールズームは `smooth` 無効・離散
 ステップ（`smooth` はホイール deltaY を乗算し1ノッチで過剰にズームするため）。
 
+Issue #34 で、キャンバス上のテーブルをヘッダー部分のドラッグで任意の位置に
+再配置できるようにした（#17のパン・ズーム実装に依存する後続Issue）。
+`types.ts` の `Table` に `manuallyPositioned?: boolean` を追加し、
+`layout.ts` の `layoutTables()` はこのフラグが立ったテーブルをグリッド
+計算から完全に除外する（x/yを一切書き換えない）。新規作成テーブルを含む
+残りの自動配置テーブルは、手動配置テーブル分の空き枠を作らず詰めて
+配置される（インデックスベース）だけでなく、各候補セルの実座標を手動配置
+テーブル・このパスで既に確定した自動配置テーブルの実矩形とAABB判定し、
+重なっていれば重ならなくなるまで下へ押し出す2パス目を持つ——手動配置は
+連続座標の任意位置になり得るため、インデックスベースの詰め処理だけでは
+新規テーブルが手動配置テーブルの実位置と衝突しうる（手動配置テーブルが
+1つもなければこの2パス目は発動せず、#34以前と出力は完全に一致する）。
+
+ドラッグでの位置変更は `PgEngine`（`pglite/engine.ts`）の
+`setTablePosition(name, x, y)` が担う。`PgEngine.run()` は常に内部の
+`this.lastState` を起点に次のスナップショットを作るため（ブラウザ側の
+`useSqlRunner` の `state` とは別物）、ドラッグ確定時はReact側の
+`dispatch` だけでなくこのメソッド経由で `this.lastState` 自体を
+書き換えないと、次の文実行で `layoutTables()` に即座に上書きされて
+消えてしまう。experimentモード中の `designCheckpoint`
+（`returnToDesign()` がROLLBACK時に復元する退避スナップショット）にも
+同じ変更を反映しており、位置はSQLデータ変更ではないため
+experiment→design遷移のロールバック対象にはならない。`useSqlRunner` は
+これを `moveTable(name, x, y)` として公開し、`App.tsx` →
+`CanvasPane.tsx` → `Canvas.tsx` → `TableNode.tsx` へ素通しする。
+
+ジェスチャー自体は `framer-motion` の `drag` prop ではなく素朴な
+pointerイベントで実装している（`TableNode.tsx` の `motion.g` が
+entry/exitアニメーションに既に `y` を使っているため）。ドラッグ起点は
+テーブルのヘッダー（`className="sqlviz-drag-handle"`、
+`data-testid="table-drag-handle"`）限定。キャンバスのパン操作
+（`react-zoom-pan-pinch`）との切り分けは `event.stopPropagation()`
+**ではなく**、`Canvas.tsx` の `TransformWrapper` に渡す
+`panning={{ excluded: ['sqlviz-drag-handle'] }}` で行っている——
+react-zoom-pan-pinchのパン開始判定は `window` への直接の `mousedown`
+リスナー（Reactのイベント委譲とは無関係）で行われるため、Reactの
+`pointerdown` ハンドラ内で `stopPropagation()` してもこのリスナーの
+発火を防げない（実装時に受け入れチェックで実際に検出した）。
+ドラッグ中のライブオフセットは `Canvas.tsx` のローカル state のみで
+管理し（`window` への `pointermove`/`pointerup` リスナー、ドラッグ中の
+テーブルのみ`memo`越しに再レンダリング）、`DBState`（および`PgEngine`
+内部の複製）は `pointerup` で一度だけ `onMoveTable` 経由で更新される。
+手動配置は現段階ではセッション限りで、`PgEngine.reset()`
+（Resetボタン）やページリロードで消える。DDLファイルへの書き出し対象は
+テーブル構造のみのまま変更していない。ALTER ADD/DROP COLUMNで手動配置
+済みテーブルの高さが変わった場合の再配置要否はIssue本文の通り未決の
+まま据え置いている（実装後の使用感確認待ち）。
+
+`tools/acceptance-check/scenarios/phaseB-drag.mjs`
+（`orchestrate-phase-b-drag.mjs`、`--phase=B-drag`）が実Chromiumで
+ヘッダーのドラッグハンドルを操作し、位置の確定・スナップバックしない
+こと・ドラッグ中はキャンバスのパン/ズームが一切動かないこと・ドラッグ後
+の別文実行で位置が保持されつつ新規テーブルが重ならないこと・原点を
+跨いでドラッグしてもキャンバスが左・上方向へ伸びること（後述）を検証する
+（`docs/alpha-phase-acceptance-criteria.md` フェーズB参照）。
+
+ドラッグ実装当初、テーブル位置の確定処理（`Canvas.tsx`の`handleUp`）に
+`Math.max(0, ...)`のクランプが入っており、左・上方向へのドラッグが
+一切できず強制的に0へフィッティングされる問題があった。これを解消する
+形で、`lib/canvasLayout.ts`の`WorldBox`（SVGの`viewBox`/`width`/`height`
+を決める型）に`minX`/`minY`（ワールド座標系での左上端）を追加した。
+
+最初の実装では「負のx/yを持つテーブルが実在する場合だけ」`minX`/`minY`を
+0から動かす条件分岐にしていたが、これだと右・下方向（常に「最右/最下
+テーブルの実端 + margin」として毎レンダー追従する）と体感が非対称になる
+——テーブルが原点(0,0)へ実際に到達する**まで**は一切拡張が起こらず、
+右・下のような「先回り」の余白が無い、というレビュー指摘を受けて設計を
+修正した。`computeWorldBox()`は現在、**ワールド原点(0,0)を暗黙に含む
+という前提そのものを持たない**：テーブルが1つも無い場合だけ`{minX:0,
+minY:0, width:MIN_WORLD_W, height:MIN_WORLD_H}`の特別扱いをし、1つでも
+あれば東西南北すべて「現在のテーブル群の実際の外接矩形（`Math.min`/
+`Math.max`）± `WORLD_MARGIN`(96px)」という同一の式で計算する。実運用では
+`layoutTables()`が非手動配置テーブルを常に`PAD`(24)基準のグリッドへ配置
+するため、DBStateに1つでも自動配置テーブルが残っていれば原点付近も
+引き続き外接矩形に含まれる——全テーブルを手動でどこか別の場所へドラッグ
+し尽くした場合のみ、境界は実際にテーブルがある場所へタイトに追従する。
+（`computeFitTransform`/`clampPan`は`<svg>`の`width`/`height`という
+不透明なCSSボックスサイズしか見ておらず`viewBox`の中身には関知しない
+ため無改修で済む。）
+
+`Canvas.tsx`はドラッグ中のライブ位置（コミット前の`dragOffset`）を
+含めた配列を`computeWorldBox()`へ渡すようにしており（`<TableNode>`へ
+渡す配列自体は`memo`のため元の`state`参照のまま）、境界は常に「先頭
+テーブルの端 ± margin」として毎レンダー再計算される——これにより
+「テーブルが外縁に接触してから拡張する」のではなく「境界は常にテーブル
+のmargin分先にありドラッグの1px目から連続的に育つ」という先回りの拡張
+が、4方向とも同じ体感で、かつ閾値判定のような追加ロジック無しで実現
+されている。SVGの`width`/`height`/`viewBox`はただの再レンダー時
+attribute値でアニメーションは一切介在しないため、拡張時に「跳ね返る」
+ような演出も存在しない。
+
 SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`、`ALTER TABLE`
 の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`
 （許可リストの拡張）、`pglite/engine.ts`（`snapshotAfter()` の文種別

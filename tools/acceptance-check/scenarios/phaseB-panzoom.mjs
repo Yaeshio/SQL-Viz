@@ -29,6 +29,24 @@ async function dragBy(page, from, dx, dy) {
   await page.mouse.up();
 }
 
+/** Issue #34: table headers carry the "sqlviz-drag-handle" class, which
+ * react-zoom-pan-pinch's `panning.excluded` skips — a blank-canvas pan drag
+ * must not accidentally start on one (this fixture's grid can coincidentally
+ * center a table header under the pane's exact midpoint at some scales), or
+ * the drag silently does nothing instead of panning. Nudges straight down in
+ * header-sized steps until elementFromPoint no longer resolves inside one. */
+async function findPanSafePoint(page, x, y) {
+  for (let i = 0; i < 8; i++) {
+    const blocked = await page.evaluate(
+      ({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.sqlviz-drag-handle'),
+      { x, y },
+    );
+    if (!blocked) return { x, y };
+    y += 60;
+  }
+  return { x, y };
+}
+
 /** Phase B / Issue #17: canvas pan & zoom + fit-to-content button. Drives real
  * wheel/pointer gestures against a fresh sql-studio dev server that has
  * auto-loaded the many-table fixture, and asserts on the data-* attributes
@@ -87,8 +105,9 @@ export async function run({ page, url, timeout }) {
       // shorter than it — the exact "letterbox" case where the old strict clamp
       // snapped every nudge back to centre. A moderate drag must mostly stick.
       const pane = await paneBox(page);
+      const origin = await findPanSafePoint(page, pane.cx, pane.cy);
       const before = await readTransform(page);
-      await dragBy(page, { x: pane.cx, y: pane.cy }, 150, 90);
+      await dragBy(page, origin, 150, 90);
       await page.waitForTimeout(400); // longer than any clamp snap animation
       const after = await readTransform(page);
       const keptX = after.panX - before.panX;
@@ -126,8 +145,9 @@ export async function run({ page, url, timeout }) {
   results.push(
     await runScenario('blank-drag-pans-without-selecting-text', async () => {
       const pane = await paneBox(page);
+      const origin = await findPanSafePoint(page, pane.cx, pane.cy);
       const before = await readTransform(page);
-      await dragBy(page, { x: pane.cx, y: pane.cy }, -170, -120);
+      await dragBy(page, origin, -170, -120);
       await page.waitForTimeout(150);
       const after = await readTransform(page);
       const moved = Math.abs(after.panX - before.panX) + Math.abs(after.panY - before.panY);
@@ -154,10 +174,11 @@ export async function run({ page, url, timeout }) {
       // Shove the same direction well past any sane content edge; the pan offset
       // must stop advancing (a limit exists) rather than run away forever.
       const pane = await paneBox(page);
+      const origin = await findPanSafePoint(page, pane.cx, pane.cy);
       const readings = [];
       for (let batch = 0; batch < 4; batch++) {
         for (let i = 0; i < 4; i++) {
-          await dragBy(page, { x: pane.cx, y: pane.cy }, 320, 260);
+          await dragBy(page, origin, 320, 260);
           await page.waitForTimeout(40);
         }
         await page.waitForTimeout(200);

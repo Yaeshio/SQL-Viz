@@ -407,6 +407,49 @@ describe('PgEngine — 実験モードからのリセット (returnToDesign)', (
   });
 });
 
+describe('PgEngine — setTablePosition（ドラッグでの手動配置, Issue #34）', () => {
+  it('ENGINE-MOVE-01: 指定テーブルの x/y を更新し manuallyPositioned を true にする', async () => {
+    await engine.run('CREATE TABLE a (id INT)', CANVAS_W, 'design');
+    const next = engine.setTablePosition('a', 123, 456);
+    expect(next.tables.a.x).toBe(123);
+    expect(next.tables.a.y).toBe(456);
+    expect(next.tables.a.manuallyPositioned).toBe(true);
+    expect(engine.getState()).toBe(next);
+  });
+
+  it('ENGINE-MOVE-02: 存在しないテーブル名を渡した場合は何もせず現在の state をそのまま返す', async () => {
+    await engine.run('CREATE TABLE a (id INT)', CANVAS_W, 'design');
+    const before = engine.getState();
+    const result = engine.setTablePosition('ghost', 1, 2);
+    expect(result).toBe(before);
+  });
+
+  it('ENGINE-MOVE-03: ドラッグ後に別テーブルへ文を実行しても layoutTables() によって位置が上書きされない', async () => {
+    await engine.run('CREATE TABLE a (id INT)', CANVAS_W, 'design');
+    await engine.run('CREATE TABLE b (id INT)', CANVAS_W, 'design');
+    engine.setTablePosition('a', 999, 888);
+
+    const { results } = await engine.run('INSERT INTO b (id) VALUES (1)', CANVAS_W, 'experiment');
+    const next = results[0].state;
+    expect(next.tables.a.x).toBe(999);
+    expect(next.tables.a.y).toBe(888);
+    expect(next.tables.a.manuallyPositioned).toBe(true);
+  });
+
+  it('ENGINE-MOVE-04: experimentモード中にドラッグした位置は design モードへの復帰（returnToDesign）後も保持される', async () => {
+    await engine.run('CREATE TABLE a (id INT)', CANVAS_W, 'design');
+    await engine.run('INSERT INTO a (id) VALUES (1)', CANVAS_W, 'experiment'); // designCheckpoint を開く
+    engine.setTablePosition('a', 111, 222);
+
+    const restored = await engine.returnToDesign();
+    expect(restored?.tables.a.x).toBe(111);
+    expect(restored?.tables.a.y).toBe(222);
+    expect(restored?.tables.a.manuallyPositioned).toBe(true);
+    // データ側のロールバックは従来通り機能する（位置だけが例外的に保持される）
+    expect(restored?.tables.a.rows).toEqual([]);
+  });
+});
+
 describe('PgEngine — 累積状態とスナップショットの独立性', () => {
   it('ENGINE-IMMUT-01: 過去に返した StatementResult.state は後続の run() で書き換わらない', async () => {
     await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W, 'design');

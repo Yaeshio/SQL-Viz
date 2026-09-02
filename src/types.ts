@@ -20,9 +20,12 @@ export interface Table {
   name: string;
   columns: Column[];
   rows: Row[];
-  /** grid position assigned by layout engine */
+  /** grid position assigned by layout engine, unless manuallyPositioned */
   x: number;
   y: number;
+  /** true once the user has dragged this table (Issue #34); layoutTables()
+   * then leaves x/y untouched instead of reassigning a grid position. */
+  manuallyPositioned?: boolean;
 }
 
 export interface DBState {

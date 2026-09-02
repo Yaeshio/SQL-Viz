@@ -83,13 +83,41 @@ node tools/acceptance-check/orchestrate-phase-b.mjs
    「限界までパンしてもテーブル群が画面外に出ない（`limitToBounds`）」。
 4. devサーバーを停止し、一時ディレクトリを削除。`{"phase": "B", ..., "ok": bool}` を出力。
 
+## 使い方（Phase B: テーブルのドラッグ移動、Issue #34）
+
+```bash
+# イメージビルドまでは Phase A と同じ
+node tools/acceptance-check/orchestrate-phase-b-drag.mjs
+```
+
+`orchestrate-phase-b-drag.mjs` は `orchestrate-phase-b.mjs` と同じ構造：
+
+1. `os.tmpdir()` 配下の使い捨てディレクトリに
+   `fixtures/phaseB-drag-schema.sql`（`t0`/`t1`の2テーブルのみ。初期フィットが
+   ちょうど scale=1 になるサイズに意図的に抑えてあり、シナリオ側でスクリーン
+   px のドラッグ量とワールド座標のdx/dyが一致する）をコピーする。
+2. そのファイルを指す実の `sql-studio` dev サーバーを `spawnVite()` で起動。
+3. `sql-viz-acceptance-check` コンテナ（`--phase=B-drag`）を実行し、実Chromiumで
+   `TableNode.tsx` が公開する `data-testid="table-drag-handle"`
+   （ヘッダー限定のドラッグハンドル）を実ポインタ操作で掴んで移動し、
+   `data-testid="table-node"` の `data-x`/`data-y` でpass/failを判定する。
+   検証項目は「ドラッグでテーブルが移動し、離した後も位置が保持される
+   （スナップバックしない）」「テーブルのドラッグ中はキャンバス全体の
+   パン・ズーム（`data-canvas-scale`/`-pan-x`/`-pan-y`）が一切動かない
+   （ヘッダーの`onPointerDown`が`stopPropagation`でreact-zoom-pan-pinch側の
+   リスナーに伝播させないことの確認）」「ドラッグ後に別のCREATE TABLEを
+   実行しても位置が保持され（`layoutTables()`による上書きがない）、かつ
+   新規テーブルがドラッグ済みテーブルと重ならない位置に生成される
+   （衝突回避パスの確認）」。
+4. devサーバーを停止し、一時ディレクトリを削除。`{"phase": "B-drag", ..., "ok": bool}` を出力。
+
 ## `run.mjs`（コンテナ側エントリポイント）のCLIオプション
 
 `orchestrate-phase-a.mjs` から内部的に呼ばれるが、単体でも実行できる。
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` |
+| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` / `B-drag` |
 | `--url` | なし（必須） | 対象のsql-studio dev serverのURL |
 | `--schema` | なし（必須） | コンテナ内から見えるスキーマファイルのパス（bind mount先、例: `/workspace/schema.sql`） |
 | `--save-dir` | なし | `A-verify` 専用。検証モードの別名保存先（bind mount先、例: `/workspace/verify-saves`） |
@@ -103,10 +131,11 @@ node tools/acceptance-check/orchestrate-phase-b.mjs
 
 ## 今後の拡張
 
-- Phase B のうち **`#17`（パン・ズーム + Fit）分は `scenarios/phaseB-panzoom.mjs`
-  として実装済み**（`#17` 本体に未決事項が無いため `#34` を待たず先行、Issue #17
-  コメントの整理に従う）。テーブルのドラッグ移動（`#34`）とその未決事項
-  （リサイズ時の再配置要否）に関わるシナリオは、`#34` 着手時に別モジュールで追加する。
+- Phase B は `#17`（パン・ズーム + Fit、`scenarios/phaseB-panzoom.mjs`）と
+  `#34`（テーブルのドラッグ移動、`scenarios/phaseB-drag.mjs`）の両方が実装済み。
+  `#34`本体の未決事項（ALTER ADD/DROP COLUMNによる手動配置済みテーブルの
+  リサイズ時に再配置が必要か）は、Issue本文の通り実装後の使用感確認まで
+  意図的に据え置いており、`phaseB-drag.mjs`はこのケースを検証しない。
 - Phase A自体（`#27`/`#31`/`#32`/`#33`）が実装されたら、`orchestrate-phase-a.mjs` の
   `spawnVite()` 直接呼び出しは、`#31` で追加される Docker 化された sql-studio
   （`docker run ... sql-studio /workspace/schema.sql`）への差し替えを検討する
