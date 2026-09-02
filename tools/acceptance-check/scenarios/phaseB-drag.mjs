@@ -24,6 +24,11 @@ async function readTablePos(page, name) {
   return page.$eval(tableNodeSelector(name), (el) => ({ x: Number(el.dataset.x), y: Number(el.dataset.y) }));
 }
 
+async function readTableScreenRect(page, name) {
+  const box = await page.locator(tableNodeSelector(name)).boundingBox();
+  return { x: box.x, y: box.y };
+}
+
 async function readWorldBox(page) {
   return page.$eval(PANE, (el) => ({
     minX: Number(el.dataset.worldMinX),
@@ -47,9 +52,11 @@ async function dragHandleBy(page, name, dx, dy) {
  * against a fresh sql-studio dev server that auto-loaded a two-table fixture,
  * asserting on the world-space `data-x`/`data-y` TableNode.tsx publishes on
  * its `data-testid="table-node"` group and on the pan/zoom data-* attributes
- * Canvas.tsx publishes (to confirm dragging a table never also pans the
- * canvas — the header's pointerdown handler stops propagation before
- * react-zoom-pan-pinch's own listener on an ancestor sees it). The fixture
+ * Canvas.tsx publishes. Dragging a table never engages the canvas *pan
+ * gesture* (the header is excluded from it), but Canvas.tsx does shift the
+ * pan transform mid-drag to cancel the SVG viewBox-origin shift a left/up
+ * drag causes, so non-dragged tables stay visually fixed and a dragged
+ * left/top-most table tracks the cursor instead of looking pinned. The fixture
  * is small enough that the initial fit sits at exactly scale=1
  * (fitToContent caps zoom-in at 1x), so a drag's screen-px delta equals its
  * world-px delta and no scale conversion is needed here. */
@@ -92,21 +99,42 @@ export async function run({ page, url, timeout }) {
   );
 
   results.push(
-    await runScenario('table-drag-does-not-pan-canvas', async () => {
-      const before = await readTransform(page);
+    await runScenario('left-drag-tracks-cursor-and-holds-other-tables-fixed', async () => {
+      // t0 was dragged right/down above; dragging t1 left by 140 now carries it
+      // left past t0, so t1 becomes the left-most table and the world box's
+      // minX starts tracking it. Two things must hold, in every direction
+      // alike: (a) the dragged table keeps following the cursor (it must NOT
+      // look pinned while the canvas grows around it), and (b) every *other*
+      // table stays put on screen — Canvas.tsx shifts the pan transform by the
+      // minX/minY delta to cancel the viewBox-origin shift. Scale is 1 for this
+      // fixture, so screen-px deltas equal the mouse deltas.
+      const t0Before = await readTableScreenRect(page, 't0');
+      const t1Before = await readTableScreenRect(page, 't1');
+      const scaleBefore = (await readTransform(page)).scale;
       await dragHandleBy(page, 't1', -140, 90);
       await page.waitForTimeout(200);
-      const after = await readTransform(page);
-      const drifted =
-        Math.abs(after.panX - before.panX) +
-        Math.abs(after.panY - before.panY) +
-        Math.abs(after.scale - before.scale);
-      if (drifted > 1) {
+      const t0After = await readTableScreenRect(page, 't0');
+      const t1After = await readTableScreenRect(page, 't1');
+      const scaleAfter = (await readTransform(page)).scale;
+
+      const t0Drift = Math.abs(t0After.x - t0Before.x) + Math.abs(t0After.y - t0Before.y);
+      if (t0Drift > 6) {
         throw new Error(
-          `canvas transform moved during a table drag: before ${JSON.stringify(before)} after ${JSON.stringify(after)}`,
+          `non-dragged t0 shifted on screen while dragging t1: before ${JSON.stringify(t0Before)} after ${JSON.stringify(t0After)}`,
         );
       }
-      return `canvas transform unchanged (drift ${drifted.toFixed(3)}) while dragging t1`;
+
+      const t1MovedX = t1After.x - t1Before.x;
+      const t1MovedY = t1After.y - t1Before.y;
+      if (t1MovedX > -120 || t1MovedY < 70) {
+        throw new Error(
+          `dragged t1 looked pinned instead of tracking the cursor: moved (${t1MovedX.toFixed(0)}, ${t1MovedY.toFixed(0)}) of (-140, 90) — before ${JSON.stringify(t1Before)} after ${JSON.stringify(t1After)}`,
+        );
+      }
+      if (Math.abs(scaleAfter - scaleBefore) > 0.001) {
+        throw new Error(`zoom changed during a table drag: ${scaleBefore} -> ${scaleAfter}`);
+      }
+      return `t1 tracked the cursor (${t1MovedX.toFixed(0)}, ${t1MovedY.toFixed(0)}) while t0 held still (drift ${t0Drift.toFixed(1)}px)`;
     }),
   );
 

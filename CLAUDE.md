@@ -247,9 +247,11 @@ react-zoom-pan-pinchのパン開始判定は `window` への直接の `mousedown
 `tools/acceptance-check/scenarios/phaseB-drag.mjs`
 （`orchestrate-phase-b-drag.mjs`、`--phase=B-drag`）が実Chromiumで
 ヘッダーのドラッグハンドルを操作し、位置の確定・スナップバックしない
-こと・ドラッグ中はキャンバスのパン/ズームが一切動かないこと・ドラッグ後
-の別文実行で位置が保持されつつ新規テーブルが重ならないこと・原点を
-跨いでドラッグしてもキャンバスが左・上方向へ伸びること（後述）を検証する
+こと・ドラッグ中はキャンバスのズームが変わらず非ドラッグテーブルが画面上で
+静止していること（下記のパン変換補正）・ドラッグ後の別文実行で位置が
+保持されつつ新規テーブルが重ならないこと・原点を跨いでドラッグしても
+キャンバスが左・上方向へ伸び、かつ左上端テーブル自身はカーソルに追従する
+こと（後述）を検証する
 （`docs/alpha-phase-acceptance-criteria.md` フェーズB参照）。
 
 ドラッグ実装当初、テーブル位置の確定処理（`Canvas.tsx`の`handleUp`）に
@@ -286,6 +288,25 @@ minY:0, width:MIN_WORLD_W, height:MIN_WORLD_H}`の特別扱いをし、1つで�
 されている。SVGの`width`/`height`/`viewBox`はただの再レンダー時
 attribute値でアニメーションは一切介在しないため、拡張時に「跳ね返る」
 ような演出も存在しない。
+
+ただしこの「ライブ位置を`computeWorldBox()`へ渡す」実装だけだと、左・上へ
+ドラッグしたときの体感が右・下と非対称になる。左・上へドラッグすると
+動かした当のテーブル自身が最左/最上になり`minX`/`minY`（＝SVGの`viewBox`
+原点）がそのテーブルに1:1で追従する。一方 react-zoom-pan-pinch のパン変換
+はヘッダードラッグ中は凍結（ヘッダーはパンジェスチャーから`excluded`）
+されているため、原点シフトを吸収するものが無く、動かしたテーブルが画面上
+でピン留めされ他のテーブルだけが逆方向へ流れて見える（右・下は`minX`/
+`minY`が動かないのでこの問題は起きない）。対策として`Canvas.tsx`は
+`useLayoutEffect`で、ドラッグ中に`world.minX`/`minY`が前レンダーから
+変化したぶんだけパン変換を`setTransform(..., 0)`（アニメーション無し）で
+即時ずらす——`screen(wx) = positionX + (wx - minX)·scale`なので、
+`positionX`に`(minX_new - minX_old)·scale`を足せば動いていないワールド点は
+画面上で静止する。結果、4方向どれも「掴んだテーブルはカーソルに追従し、
+他のテーブル・背景は静止したままキャンバスが先回りで育つ」体感に揃う。
+補正は`viewBox`変更と同じフレームで走る（`useLayoutEffect`）ためちらつき
+は無く、`setTransform`は既存の`onTransform`経由で`data-canvas-pan-x/y`を
+更新するだけで再レンダーは起こさない。ドロップ確定時のレンダーは最後の
+ドラッグレンダーと同じ原点になるためジャンプしない。
 
 SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`、`ALTER TABLE`
 の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`
