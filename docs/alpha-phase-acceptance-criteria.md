@@ -134,6 +134,10 @@ SQL-Vizのα版検証は「フェーズA: ワークフロー体験 → フェー
   「正常実行を期待」へ更新する（同ドキュメント4節に既に記載されている想定移行）。
 - **Largeティア**（JOIN、GROUP BY/集約）: `DBState`/`Row`（1テーブル=1行セット前提）の
   データモデル再設計が先決であり、テストシナリオは未定義のまま据え置く。
+  JOIN/GROUP BYのアニメーション表現設計メモは
+  [#35のコメント](https://github.com/Yaeshio/SQL-Viz/issues/35)に記載。
+  JOIN可視化はFKリレーション線描画（[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)）を
+  前提依存とする。
 
 ## 参照
 

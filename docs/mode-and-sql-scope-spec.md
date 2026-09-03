@@ -68,7 +68,9 @@ Issue #26でローカルCLI経由のファイル同期へ移行し同ドキュ�
   丸められているため、`VARCHAR(50)` の長さなどの精度を落とさないため
   である（`src/pglite/ddlExport.ts` の `generateDdl()`）。
 - **範囲**: テーブル定義（列名・型）のみ。制約（`PRIMARY KEY`/
-  `FOREIGN KEY`/`NOT NULL`/`DEFAULT`等）はMVPでは対象外（5節）。
+  `FOREIGN KEY`/`NOT NULL`/`DEFAULT`等）はMVPでは対象外（5節）。FK制約の
+  モデル化・DDL出力・キャンバス描画は
+  [Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45) で追跡する。
 - **テーブルの並び順**: `DBState.order`（画面上のレイアウト順）に従う。
 
 ## 4. `ALTER TABLE` のMVPスコープ
@@ -85,7 +87,10 @@ Issue #26でローカルCLI経由のファイル同期へ移行し同ドキュ�
 
 - テーブル間のリレーション（外部キー）のモデル化・DDL出力・キャンバス
   描画。`types.ts` のモデル拡張・パーサー拡張・キャンバス描画を伴う
-  別プロジェクト規模になるため対象外とする。
+  別プロジェクト規模になるため #35 のスコープ外とし、
+  [Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45) で追跡する
+  （静的なリレーション表現に限る。JOIN結果クエリの実行・可視化は #35
+  Largeティア）。
 - `PRIMARY KEY`/`FOREIGN KEY`/`NOT NULL`/`DEFAULT` 等の制約定義
   （3節）。
 - `WHERE` は `SELECT`/`UPDATE`/`DELETE` いずれも単一の `<col> <op>
