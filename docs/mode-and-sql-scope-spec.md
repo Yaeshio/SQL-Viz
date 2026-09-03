@@ -87,10 +87,9 @@ Issue #26でローカルCLI経由のファイル同期へ移行し同ドキュ�
 
 - テーブル間のリレーション（外部キー）のモデル化・DDL出力・キャンバス
   描画。`types.ts` のモデル拡張・パーサー拡張・キャンバス描画を伴う
-  別プロジェクト規模になるため #35 のスコープ外とし、
-  [Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45) で追跡する
-  （静的なリレーション表現に限る。JOIN結果クエリの実行・可視化は #35
-  Largeティア）。
+  別プロジェクト規模になるため #48（SQL対応拡大 Largeティア）のスコープ外
+  とし、[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45) で追跡する
+  （静的なリレーション表現に限る。JOIN結果クエリの実行・可視化は #48）。
 - `PRIMARY KEY`/`FOREIGN KEY`/`NOT NULL`/`DEFAULT` 等の制約定義
   （3節）。
 - `WHERE` は `SELECT`/`UPDATE`/`DELETE` いずれも単一の `<col> <op>

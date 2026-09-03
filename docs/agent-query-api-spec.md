@@ -139,7 +139,7 @@ DDLの実行）が完了しているかどうか。`error`は、ブートスト�
   `events`を経由する必要は薄い。
 
 **この取り出し規約は単一テーブル前提である。** JOIN等の複数テーブルを
-またぐ文が将来追加された際（[Issue #35](https://github.com/Yaeshio/SQL-Viz/issues/35)、
+またぐ文が将来追加された際（[Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)、
 本仕様のスコープ外）は、本規約の見直しが必要になる。
 
 ## 5. CLI仕様
@@ -197,8 +197,11 @@ npmを介さず`node scripts/query.mjs "<SQL>"`を直接呼び出すこと。後
   状態をリアルタイムに同期させること（2節）。
 - 複数エージェント/複数クライアントが同一サーバーに同時接続する際の、
   セッション分離・認可制御。
-- JOIN・複合WHERE・ALTER TABLEのRENAME/型変更等、現時点で`parser.ts`が
-  対応していない構文への拡張（[Issue #35](https://github.com/Yaeshio/SQL-Viz/issues/35)）。
+- 複合WHERE・ALTER TABLEのRENAME/型変更・単一ALTER文での複数アクション等、
+  現時点で`parser.ts`が対応していない構文への拡張（Mediumティア、
+  [Issue #47](https://github.com/Yaeshio/SQL-Viz/issues/47)）。
+- JOIN・GROUP BY/集約等、複数テーブル結合・集約結果の可視化を伴う構文への
+  拡張（Largeティア、[Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)）。
 
 ## 8. 参照
 

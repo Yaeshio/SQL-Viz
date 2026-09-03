@@ -312,7 +312,12 @@ SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`�
 の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`
 （許可リストの拡張）、`pglite/engine.ts`（`snapshotAfter()` の文種別
 ロジック）、そして新しいアニメーションイベントが必要であれば
-`diff.ts`/`components/canvas/` にまたがって変更することになる。
+`diff.ts`/`components/canvas/` にまたがって変更することになる。具体的な
+拡張は Issue #35 を2ティアに分割した Issue #47（Medium：複合 `WHERE`／
+`ALTER TABLE RENAME`／単一 `ALTER` 文での複数アクション。前提依存なし）と
+Issue #48（Large：`JOIN`／`GROUP BY`・集約。`types.ts` のデータモデル
+再設計が先決で、FK リレーション線描画の Issue #45 を前提依存とする）で
+追跡している。
 
 ビルド／テスト設定面の補足：`vite.config.ts` は `@electric-sql/pglite` を
 `optimizeDeps.exclude` に指定している（WASM/ワーカーアセットを Vite の
