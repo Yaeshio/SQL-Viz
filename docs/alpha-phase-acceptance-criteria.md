@@ -123,19 +123,26 @@ SQL-Vizのα版検証は「フェーズA: ワークフロー体験 → フェー
   `tools/acceptance-check`という別枠のDocker限定ハーネスで対応する（同ファイル§3末尾の
   補足参照）。
 
-## フェーズC: SQL対応拡大（#35）
+## フェーズC: SQL対応拡大（Medium: #47 / Large: #48）
+
+もともと [Issue #35](https://github.com/Yaeshio/SQL-Viz/issues/35) 1本だったが、
+着手時期・前提依存の異なる Medium / Large 2ティアに分割・クローズした。
 
 完了条件はブラウザを介さない——`parser.ts`/`pglite/engine.ts`のロジック層の話であるため、
 `tools/acceptance-check`ではなく `tests/` 配下（vitest）で検証する。
 
 - **Mediumティア**（複合WHERE、ALTER TABLE RENAME、単一ALTER文での複数アクション）:
+  [Issue #47](https://github.com/Yaeshio/SQL-Viz/issues/47)。
   `tests/parser.test.ts`/`tests/engine.test.ts` の拡張が対象。あわせて
-  `docs/smoke-test-spec.md` のSMOKE-14/15を「`Unsupported clause`エラーを期待」から
-  「正常実行を期待」へ更新する（同ドキュメント4節に既に記載されている想定移行）。
-- **Largeティア**（JOIN、GROUP BY/集約）: `DBState`/`Row`（1テーブル=1行セット前提）の
+  `docs/smoke-test-spec.md` のSMOKE-15（複合WHERE）を「`Unsupported clause`エラーを期待」から
+  「正常実行を期待」へ更新する（同ドキュメント4節に既に記載されている想定移行。
+  SMOKE-14はJOIN=Largeティアのため対象外）。
+- **Largeティア**（JOIN、GROUP BY/集約）:
+  [Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)。
+  `DBState`/`Row`（1テーブル=1行セット前提）の
   データモデル再設計が先決であり、テストシナリオは未定義のまま据え置く。
   JOIN/GROUP BYのアニメーション表現設計メモは
-  [#35のコメント](https://github.com/Yaeshio/SQL-Viz/issues/35)に記載。
+  [#48のコメント](https://github.com/Yaeshio/SQL-Viz/issues/48)に記載。
   JOIN可視化はFKリレーション線描画（[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)）を
   前提依存とする。
 
