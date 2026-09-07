@@ -31,6 +31,11 @@ interface DesignCheckpoint {
   rowSeq: number;
 }
 
+/** Fixed savepoint name wrapped around every statement while the experiment
+ * transaction is open, so one failed statement rolls back to just before
+ * itself instead of aborting the whole transaction (Issue #36). */
+const STMT_SAVEPOINT = 'sqlviz_stmt';
+
 export function quoteIdent(name: string): string {
   return `"${name.toLowerCase().replace(/"/g, '""')}"`;
 }
@@ -256,27 +261,44 @@ export class PgEngine {
     const results: StatementResult[] = [];
     let current = this.lastState;
 
+    // While the experiment transaction is open, wrap each statement in a
+    // SAVEPOINT so a failed statement only rolls back to just before itself.
+    // Without this, one Postgres error aborts the whole transaction, and
+    // since that transaction stays open across run() calls, every later
+    // request fails — in either mode — until POST /api/query/reset (Issue
+    // #36). Guarded on inExperimentTx because SAVEPOINT is only valid inside
+    // a transaction block; design-mode autocommit statements need none.
+    const useSavepoint = this.inExperimentTx;
+
     for (const { raw, stmt } of parsed) {
       const label = buildLabel(stmt);
 
-      let matchedIds: Set<string> | null = null;
-      if (stmt.type === 'update' || stmt.type === 'delete') {
-        try {
-          matchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
-        } catch (e) {
-          results.push({ label, state: current, events: [], error: formatPgError(e) });
-          break;
-        }
-      }
+      if (useSavepoint) await db.query(`SAVEPOINT ${STMT_SAVEPOINT}`);
 
+      let next: DBState;
       try {
+        // For UPDATE/DELETE, resolve matched ids before the raw statement
+        // runs (Postgres reassigns ctids on update) — inside the savepoint so
+        // a failure here rolls back cleanly too.
+        let matchedIds: Set<string> | null = null;
+        if (stmt.type === 'update' || stmt.type === 'delete') {
+          matchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
+        }
         await db.query(raw);
+        next = await this.snapshotAfter(stmt, current, matchedIds);
       } catch (e) {
+        if (useSavepoint) {
+          // ROLLBACK TO doesn't release the savepoint; RELEASE afterward
+          // keeps the savepoint stack from growing across statements.
+          await db.query(`ROLLBACK TO SAVEPOINT ${STMT_SAVEPOINT}`);
+          await db.query(`RELEASE SAVEPOINT ${STMT_SAVEPOINT}`);
+        }
         results.push({ label, state: current, events: [], error: formatPgError(e) });
         break;
       }
 
-      const next = await this.snapshotAfter(stmt, current, matchedIds);
+      if (useSavepoint) await db.query(`RELEASE SAVEPOINT ${STMT_SAVEPOINT}`);
+
       const laidOut = layoutTables(next, worldWidth);
       const events = diffStates(current, laidOut);
       results.push({ label, state: laidOut, events });

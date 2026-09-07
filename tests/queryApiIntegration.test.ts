@@ -128,6 +128,41 @@ describe('agent query API — real server + real CLI subprocess', () => {
   );
 
   it(
+    'QUERY-INT-04: 実験モードのエラー後もセッションが汚染されず後続リクエストが通る (Issue #36)',
+    async () => {
+      tmpDir = await mkdtemp(path.join(tmpdir(), 'sql-viz-query-api-'));
+      const schemaPath = path.join(tmpDir, 'schema.sql');
+
+      server = await spawnVite({ filePath: schemaPath, port: undefined });
+      const url = server.resolvedUrls!.local[0];
+      await waitForHealthy(url);
+
+      const post = (sql: string, mode: string) =>
+        fetch(`${url}api/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, mode }),
+        }).then((r) => r.json());
+
+      expect((await post('CREATE TABLE users (id INT, name VARCHAR(50))', 'design')).results[0].error).toBeUndefined();
+
+      const bad = await post('INSERT INTO ghost (x) VALUES (1)', 'experiment');
+      expect(bad.results[0].error).toBe('relation "ghost" does not exist');
+
+      // Before the SAVEPOINT fix this failed with
+      // "current transaction is aborted, commands ignored until end of transaction block".
+      const recovered = await post('SELECT * FROM users', 'experiment');
+      expect(recovered.parseError).toBeUndefined();
+      expect(recovered.results[0].error).toBeUndefined();
+
+      // A design-mode statement after the experiment error also works again.
+      const alter = await post('ALTER TABLE users ADD COLUMN age INT', 'design');
+      expect(alter.results[0].error).toBeUndefined();
+    },
+    60000,
+  );
+
+  it(
     'QUERY-INT-03: CLI — サーバー未起動/接続不可 → exit code 2',
     async () => {
       const result = await runCli(['SELECT 1', '--url=http://127.0.0.1:1']);

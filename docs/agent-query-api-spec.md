@@ -142,6 +142,26 @@ DDLの実行）が完了しているかどうか。`error`は、ブートスト�
 またぐ文が将来追加された際（[Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)、
 本仕様のスコープ外）は、本規約の見直しが必要になる。
 
+### エラー発生時のセッション挙動
+
+文がPostgresエラー（型不一致・制約違反・存在しないテーブル等、
+`StatementResult.error`に文言が入るケース）になった場合：
+
+- **その失敗した1文だけ**が取り消される（`experiment`モードでは内部的に
+  文ごとの`SAVEPOINT`へロールバックする）。同一リクエスト内でそれ以前に
+  成功した文、および過去の`POST /api/query`呼び出しで成功した文の効果は
+  すべて維持される。
+- 同一バッチ内では、最初にエラーになった文で実行を打ち切る（それ以降の
+  文は実行されない）。`results`にはエラー文を含むそこまでの
+  `StatementResult`が入る。
+- **セッションは汚染されない。** エラー後も後続のリクエストを
+  `design`/`experiment`どちらのモードでもそのまま受け付ける。回復のための
+  `POST /api/query/reset`は不要。
+- `experiment`モードで積み上げた未コミットのデータ変更を**まとめて**
+  破棄したい場合の手段は引き続き`POST /api/query/reset`（サーバーセッション
+  では`experiment→design`のモード復帰による`ROLLBACK`経路は無いため、
+  全取り消しには`reset`を使う）。
+
 ## 5. CLI仕様
 
 `node scripts/query.mjs "<SQL>"`（または`npm run query -- "<SQL>"`）で、

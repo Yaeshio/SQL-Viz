@@ -407,6 +407,77 @@ describe('PgEngine — 実験モードからのリセット (returnToDesign)', (
   });
 });
 
+describe('PgEngine — エラー後のソフトリカバリ (SAVEPOINT, Issue #36)', () => {
+  it('ENGINE-SOFTRECOVER-01: 実験モードのエラー後、続けて送った正常な INSERT が成功する', async () => {
+    await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W, 'design');
+
+    const bad = await engine.run('INSERT INTO ghost (x) VALUES (1)', CANVAS_W, 'experiment');
+    expect(bad.results[0].error).toBe('relation "ghost" does not exist');
+
+    const good = await engine.run("INSERT INTO users (id, name) VALUES (1, 'Alice')", CANVAS_W, 'experiment');
+    expect(good.results[0].error).toBeUndefined();
+    expect(good.results[0].state.tables.users.rows).toHaveLength(1);
+    expect(good.results[0].state.tables.users.rows[0].values).toEqual({ id: 1, name: 'Alice' });
+  });
+
+  it('ENGINE-SOFTRECOVER-02: 実験モードのエラー後、SELECT が transaction aborted にならず正常にフィルタする', async () => {
+    await engine.run('CREATE TABLE users (id INT, name VARCHAR(50))', CANVAS_W, 'design');
+    await engine.run("INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')", CANVAS_W, 'experiment');
+
+    const bad = await engine.run('SELECT * FROM ghost', CANVAS_W, 'experiment');
+    expect(bad.results[0].error).toBe('relation "ghost" does not exist');
+
+    const sel = await engine.run('SELECT * FROM users WHERE id = 1', CANVAS_W, 'experiment');
+    expect(sel.results[0].error).toBeUndefined();
+    expect(sel.results[0].state.tables.users.rows.map((r) => r.filteredOut)).toEqual([false, true]);
+  });
+
+  it('ENGINE-SOFTRECOVER-03: 実験モードのエラー後、design モードの ALTER が成功する（再現手順5の回帰）', async () => {
+    await engine.run('CREATE TABLE users (id INT)', CANVAS_W, 'design');
+
+    const bad = await engine.run('INSERT INTO ghost (x) VALUES (1)', CANVAS_W, 'experiment');
+    expect(bad.results[0].error).toBe('relation "ghost" does not exist');
+
+    const alter = await engine.run('ALTER TABLE users ADD COLUMN age INT', CANVAS_W, 'design');
+    expect(alter.results[0].error).toBeUndefined();
+    expect(alter.results[0].state.tables.users.columns).toEqual([
+      { name: 'id', type: 'INT' },
+      { name: 'age', type: 'INT' },
+    ]);
+  });
+
+  it('ENGINE-SOFTRECOVER-04: 単一バッチ内でエラーが起きても先行文は残り、後続の run() が成功する', async () => {
+    await engine.run('CREATE TABLE t (a INT)', CANVAS_W, 'design');
+
+    const batch = await engine.run(
+      'INSERT INTO t (a) VALUES (1); INSERT INTO t (b) VALUES (2); INSERT INTO t (a) VALUES (3)',
+      CANVAS_W,
+      'experiment',
+    );
+    expect(batch.results).toHaveLength(2);
+    expect(batch.results[0].error).toBeUndefined();
+    expect(batch.results[1].error).toBe('column "b" of relation "t" does not exist');
+
+    const after = await engine.run('SELECT * FROM t', CANVAS_W, 'experiment');
+    expect(after.results[0].error).toBeUndefined();
+    expect(after.results[0].state.tables.t.rows.map((r) => r.values.a)).toEqual([1]);
+  });
+
+  it('ENGINE-SOFTRECOVER-05: エラーを挟んだ実験セッションも returnToDesign() で丸ごと巻き戻る', async () => {
+    await engine.run('CREATE TABLE users (id INT)', CANVAS_W, 'design');
+    await engine.run('INSERT INTO users (id) VALUES (1)', CANVAS_W, 'experiment');
+
+    const bad = await engine.run('INSERT INTO ghost (x) VALUES (1)', CANVAS_W, 'experiment');
+    expect(bad.results[0].error).toBe('relation "ghost" does not exist');
+
+    await engine.run('INSERT INTO users (id) VALUES (2)', CANVAS_W, 'experiment');
+
+    const restored = await engine.returnToDesign();
+    expect(restored?.tables.users.rows).toEqual([]);
+    expect(restored?.tables.users.columns).toEqual([{ name: 'id', type: 'INT' }]);
+  });
+});
+
 describe('PgEngine — setTablePosition（ドラッグでの手動配置, Issue #34）', () => {
   it('ENGINE-MOVE-01: 指定テーブルの x/y を更新し manuallyPositioned を true にする', async () => {
     await engine.run('CREATE TABLE a (id INT)', CANVAS_W, 'design');
