@@ -11,23 +11,23 @@ interface SaveSchemaAsResponse {
   error?: string;
 }
 
-/** author: today's unrestricted behavior (Save overwrites the target file
- * directly). verify: the target file is never written to; Save instead
- * exports to a separate, server-chosen path (see saveSchemaAs). Independent
- * of the session-level AppMode ('design'/'experiment') — this is a
- * startup-time, CLI-flag-driven axis, not a PGlite execution gate. */
+/** author: 現状の無制限な挙動（Save は対象ファイルを直接上書きする）。
+ * verify: 対象ファイルへは決して書き込まず、Save は代わりにサーバーが選んだ
+ * 別のパスへエクスポートする（saveSchemaAs 参照）。セッションレベルの AppMode
+ * （'design'/'experiment'）とは独立——これは起動時に CLI フラグで決まる軸であり、
+ * PGlite の実行ゲートではない。 */
 export type StartupMode = 'author' | 'verify';
 
-/** True only when scripts/openLocal.mjs's `spawnVite()` injected
- * VITE_LOCAL_FILE at dev-server startup — never true in a Vercel/hosted
- * build, since that build never runs through the CLI. */
+/** scripts/openLocal.mjs の `spawnVite()` が dev サーバー起動時に
+ * VITE_LOCAL_FILE を注入したときだけ true——Vercel / ホスティングビルドでは
+ * そのビルドが CLI を通らないため決して true にならない。 */
 export function isLocalMode(): boolean {
   return Boolean(import.meta.env.VITE_LOCAL_FILE);
 }
 
-/** Reads the build-time VITE_STARTUP_MODE flag set by spawnVite() from
- * `--mode=`. Defaults to 'author' when unset (hosted build, or CLI launched
- * without the flag), matching openLocal.mjs's own default. */
+/** spawnVite() が `--mode=` から設定するビルド時フラグ VITE_STARTUP_MODE を
+ * 読む。未設定時は 'author' を既定とし（ホスティングビルド、またはフラグ無しで
+ * 起動した CLI）、openLocal.mjs 自身の既定と一致させる。 */
 export function getStartupMode(): StartupMode {
   return import.meta.env.VITE_STARTUP_MODE === 'verify' ? 'verify' : 'author';
 }
@@ -52,9 +52,8 @@ export async function saveSchema(content: string): Promise<void> {
   throw new Error(body.error ?? `POST /api/schema failed: ${res.status}`);
 }
 
-/** verify-mode counterpart to saveSchema(): writes to a server-chosen path
- * outside the target file (see apiPlugin.ts's /api/schema/verify-save)
- * instead of overwriting it. */
+/** saveSchema() の verify モード版: 対象ファイルを上書きする代わりに、その外側の
+ * サーバーが選んだパスへ書き込む（apiPlugin.ts の /api/schema/verify-save 参照）。 */
 export async function saveSchemaAs(content: string): Promise<{ path: string }> {
   const res = await fetch('/api/schema/verify-save', {
     method: 'POST',
