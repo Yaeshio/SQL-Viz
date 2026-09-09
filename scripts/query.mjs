@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Agent-facing CLI for POST /api/query (Issue #27). Plain JS, no TypeScript
-// imports — unlike openLocal.mjs it needs no PgEngine/type access, so it
-// stays outside Node's erasable-syntax type-stripping constraint entirely.
+// POST /api/query 用のエージェント向け CLI（Issue #27）。素の JS で、TypeScript
+// の import は持たない——openLocal.mjs と違い PgEngine や型へのアクセスが不要な
+// ため、Node の消去可能構文（erasable syntax）による型ストリッピングの制約の
+// 外側に完全に留まれる。
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_URL = 'http://127.0.0.1:5173';
@@ -31,9 +32,9 @@ export async function readStdin(stream = process.stdin) {
   return Buffer.concat(chunks).toString('utf-8');
 }
 
-/** Pure: does the fetch, returns everything main() needs. Never touches
- * process.exit/console itself, so it's directly unit-testable with a
- * stubbed fetchImpl. */
+/** 純粋関数: fetch を行い、main() が必要とするものをすべて返す。自身は
+ * process.exit / console に一切触れないため、fetchImpl をスタブすれば
+ * そのまま単体テストできる。 */
 export async function runQuery({ sql, mode, url, fetchImpl = fetch }) {
   let res;
   try {
@@ -50,7 +51,7 @@ export async function runQuery({ sql, mode, url, fetchImpl = fetch }) {
   try {
     json = await res.json();
   } catch {
-    // leave json null; handled below via optional chaining
+    // json は null のままにしておく（下でオプショナルチェーンにより処理する）
   }
 
   if (!res.ok) {

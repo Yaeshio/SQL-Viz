@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Host-side orchestrator for the Phase B (Issue #17 — canvas pan/zoom + fit)
-// acceptance scenario. Same shape as orchestrate-phase-a.mjs but simpler: one
-// dev server, no verify/restart passes. Boots a real Vite dev server (the same
-// spawnVite() `npm run sql-studio` uses) against a throwaway copy of the
-// many-table fixture so the app auto-loads a canvas larger than the Playwright
-// viewport, then runs the scenario container (built from ./Dockerfile).
+// Phase B（Issue #17 — キャンバスのパン/ズーム + fit）の受け入れシナリオの
+// ホスト側オーケストレーター。orchestrate-phase-a.mjs と同型だがより単純: dev
+// サーバーは 1 つだけで、verify / restart のパスは無い。多数テーブルの fixture の
+// 使い捨てコピーに対して実 Vite dev サーバー（`npm run sql-studio` が使う
+// spawnVite() と同じもの）を起動し、アプリが Playwright のビューポートより
+// 大きいキャンバスを自動ロードするようにしてから、シナリオコンテナ
+// （./Dockerfile からビルド）を実行する。
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -41,7 +42,7 @@ async function runDockerPhase(phase, port, tmpDir) {
       try {
         return JSON.parse(lastLine);
       } catch {
-        // fall through
+        // フォールスルー
       }
     }
     throw err;

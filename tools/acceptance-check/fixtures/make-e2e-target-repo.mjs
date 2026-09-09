@@ -1,27 +1,26 @@
 #!/usr/bin/env node
-// Deterministically materializes a throwaway "target project" git repo for the
-// Issue #31 Docker E2E runbook (docs/issue31-docker-e2e-runbook.md). This
-// stands in for a real downstream project that bind-mounts its schema file
-// into the sql-studio container — it is intentionally NOT the SQL-Viz repo.
+// Issue #31 の Docker E2E ランブック（docs/issue31-docker-e2e-runbook.md）用に、
+// 使い捨ての「対象プロジェクト」git リポジトリを決定論的に生成する。これは
+// スキーマファイルを sql-studio コンテナへ bind mount する実際の下流プロジェクトの
+// 代役であり、意図的に SQL-Viz リポジトリではない。
 //
-// Usage:  node tools/acceptance-check/fixtures/make-e2e-target-repo.mjs <dest-dir>
+// 使い方:  node tools/acceptance-check/fixtures/make-e2e-target-repo.mjs <dest-dir>
 //
-// <dest-dir> must not exist yet, or must be an empty directory. The schema DDL
-// file itself (db/schema.sql) is deliberately NOT created, so the first
-// container run exercises the cold-start / ENOENT path that
-// scenarios/phaseA-initial.mjs asserts on.
+// <dest-dir> はまだ存在しないか、空のディレクトリでなければならない。スキーマ DDL
+// ファイル本体（db/schema.sql）は意図的に作成しない。これにより最初のコンテナ実行が、
+// scenarios/phaseA-initial.mjs がアサートするコールドスタート / ENOENT 経路を通る。
 //
-// stdout (parsed by the runbook):
+// stdout（ランブックがパースする）:
 //   SCHEMA_REL=db/schema.sql
-//   DEST=<absolute path>
+//   DEST=<絶対パス>
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const SCHEMA_REL = 'db/schema.sql';
 
-// Fixed, side-effect-free file contents — no timestamps / versions / hostnames,
-// so the repo hashes identically on every run.
+// 固定された副作用のないファイル内容——タイムスタンプ / バージョン / ホスト名を
+// 含まないため、リポジトリは毎回同一にハッシュされる。
 const FILES = {
   '.gitignore': ['node_modules/', 'verify-saves/', ''].join('\n'),
   'README.md': [
@@ -62,7 +61,7 @@ function main(argv) {
   const git = (...args) => execFileSync('git', ['-C', dest, ...args], { stdio: 'pipe' });
   git('init', '-q');
   git('add', '-A');
-  // -c avoids depending on the machine's global git identity.
+  // -c によりマシンのグローバルな git identity への依存を避ける。
   git(
     '-c',
     'user.email=e2e@example.invalid',

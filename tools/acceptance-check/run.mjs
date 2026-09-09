@@ -21,7 +21,7 @@ if (!values.phase || !values.url || !values.schema) {
   process.exit(2);
 }
 
-// --phase=A-initial -> ./scenarios/phaseA-initial.mjs
+// --phase=A-initial → ./scenarios/phaseA-initial.mjs
 const { run } = await import(`./scenarios/phase${values.phase}.mjs`);
 
 const timeout = Number(values.timeout);

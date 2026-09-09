@@ -2,16 +2,16 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runScenario } from './runScenario.mjs';
 
-// AppHeader.tsx renders "tables N" / "rows N" as two `.font-mono.text-slate-200`
-// spans in that order — `.first()` is the tables count.
+// AppHeader.tsx は "tables N" / "rows N" を `.font-mono.text-slate-200` の
+// span 2 つとしてこの順に描画する——`.first()` がテーブル数。
 const TABLE_COUNT_SELECTOR = 'span.font-mono.text-slate-200';
 
-/** Issue #32's verify-mode scenarios: a fresh openLocal.mjs process spawned
- * with mode: 'verify' against the "products" schema file left behind by
- * phaseA-restart.mjs, plus a saveDir under the same mounted tmp directory.
- * Exercises the multi-layer write guard end-to-end: silent auto-load still
- * works (reads aren't restricted), Save exports to saveDir instead of
- * touching the target file, and a direct POST /api/schema is rejected. */
+/** Issue #32 の verify モードシナリオ: phaseA-restart.mjs が残した "products"
+ * スキーマファイルに対し mode: 'verify' で起動した新しい openLocal.mjs プロセスと、
+ * 同じくマウント済みの一時ディレクトリ配下の saveDir。多層の書き込みガードを
+ * エンドツーエンドで通す: サイレント自動ロードは引き続き動作し（読み取りは
+ * 制限されない）、Save は対象ファイルに触れず saveDir へエクスポートし、
+ * POST /api/schema への直接アクセスは拒否される。 */
 export async function run({ page, url, schemaPath, saveDir, timeout }) {
   const results = [];
 

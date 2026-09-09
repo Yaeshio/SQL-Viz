@@ -17,11 +17,11 @@ export function resolveDdlPath(arg, cwd = process.cwd()) {
   return path.isAbsolute(arg) ? arg : path.resolve(cwd, arg);
 }
 
-/** Mirrors scripts/query.mjs's parseArgs: `--mode=`/`--save-dir=` are pulled
- * out of argv by prefix match, everything else is positional (the DDL file
- * path). `mode` defaults to 'author' (today's unrestricted behavior);
- * `saveDir` stays undefined when unset so `main()` can tell "not provided"
- * apart from "explicitly set to the default". */
+/** scripts/query.mjs の parseArgs と同じ方針: `--mode=` / `--save-dir=` を
+ * プレフィックス一致で argv から抜き出し、それ以外は位置引数（DDL ファイルの
+ * パス）として扱う。`mode` の既定は 'author'（現状の無制限な挙動）。
+ * `saveDir` は未指定のとき undefined のままにしておくことで、`main()` が
+ * 「未指定」と「明示的に既定値を指定」を区別できるようにする。 */
 export function parseArgs(argv) {
   let mode = 'author';
   let saveDir;
@@ -52,19 +52,21 @@ export function openBrowser(url, platform = process.platform) {
   });
 }
 
-/** Boots Vite's dev server via the JS API (not the `vite` CLI binary), so
- * that localApiPlugin can be injected purely from this script — vite.config.ts
- * itself never has to know about local-mode. createServer() still auto-loads
- * vite.config.ts and merges this inline config into it (configFile isn't set
- * to false), so react() etc. from that file keep working unchanged.
+/** Vite の dev サーバーを（`vite` CLI バイナリではなく）JS API 経由で起動する。
+ * これにより localApiPlugin をこのスクリプトだけから注入でき、vite.config.ts
+ * 自体はローカルモードを一切知らなくて済む。createServer() は引き続き
+ * vite.config.ts を自動ロードし、このインライン設定をそこへマージする
+ * （configFile を false にはしていない）ため、あちらの react() 等はそのまま
+ * 動き続ける。
  *
- * `host` defaults to '127.0.0.1' (spec §5: unreachable from the LAN). The
- * Docker entrypoint (Issue #31) overrides it to '0.0.0.0' via SQL_STUDIO_HOST
- * so `docker run -p` can reach the server; LAN-unreachability then depends on
- * the operator publishing the port as `-p 127.0.0.1:5173:5173`.
- * `cacheDir` defaults to Vite's own (`node_modules/.vite`); the Docker image
- * points it at a world-writable path via SQL_STUDIO_CACHE_DIR so a non-root
- * `docker run --user` can still write the dep-optimize cache.
+ * `host` の既定は '127.0.0.1'（仕様 §5: LAN から到達不能）。Docker の
+ * エントリポイント（Issue #31）は SQL_STUDIO_HOST 経由でこれを '0.0.0.0' に
+ * 上書きし、`docker run -p` でサーバーへ到達できるようにする。その場合の
+ * LAN 非到達性は、利用者がポートを `-p 127.0.0.1:5173:5173` として公開する
+ * ことに委ねられる。
+ * `cacheDir` の既定は Vite 自身のもの（`node_modules/.vite`）。Docker イメージは
+ * SQL_STUDIO_CACHE_DIR 経由でこれを誰でも書けるパスへ向け、非 root の
+ * `docker run --user` でも依存事前バンドルのキャッシュを書けるようにする。
  * @param {{ filePath: string, port?: number, mode?: 'author' | 'verify', saveDir?: string, host?: string, cacheDir?: string }} opts */
 export async function spawnVite({
   filePath,
@@ -95,9 +97,9 @@ export async function main(argv = process.argv.slice(2)) {
 
   const filePath = resolveDdlPath(filePathArg);
   const resolvedSaveDir = mode === 'verify' ? (saveDir ?? DEFAULT_VERIFY_SAVE_DIR) : undefined;
-  // Non-VITE_-prefixed env vars: consumed here, never exposed to the browser
-  // bundle. Set by docker/sql-studio/Dockerfile; unset on the normal
-  // `npm run sql-studio` path so spawnVite's defaults apply.
+  // VITE_ プレフィックスの付かない環境変数: ここで消費するだけで、ブラウザ
+  // バンドルへは一切公開しない。docker/sql-studio/Dockerfile が設定する。
+  // 通常の `npm run sql-studio` 経路では未設定なので spawnVite の既定値が効く。
   const host = process.env.SQL_STUDIO_HOST || undefined;
   const cacheDir = process.env.SQL_STUDIO_CACHE_DIR || undefined;
   const server = await spawnVite({ filePath, mode, saveDir: resolvedSaveDir, host, cacheDir });
