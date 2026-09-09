@@ -20,9 +20,10 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Reads a UTF-8 text file, treating ENOENT as "" rather than an error —
- * shared by GET /api/schema and the agent-query-API's startup/reset DDL
- * bootstrap (both need "missing file = empty content", not a failure). */
+/** UTF-8 テキストファイルを読み込み、ENOENT はエラーではなく "" として扱う——
+ * GET /api/schema と、エージェントクエリ API の起動時/リセット時 DDL
+ * ブートストラップで共有する（どちらも「ファイル無し = 空の内容」を必要とし、
+ * 失敗として扱わない）。 */
 export async function readDdlFile(filePath: string): Promise<string> {
   try {
     return await readFile(filePath, 'utf-8');

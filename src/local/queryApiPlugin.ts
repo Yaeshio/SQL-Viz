@@ -9,22 +9,22 @@ function isAppMode(value: unknown): value is AppMode {
   return value === 'design' || value === 'experiment';
 }
 
-/** Vite dev-server plugin exposing the agent-facing SQL execution API
- * (Issue #27): POST /api/query, GET /api/query/state, GET /api/query/health,
- * POST /api/query/reset. Wraps a single, server-process-lifetime PgEngine
- * session — completely independent from the browser's own PGlite instance,
- * bootstrapped from (and, on reset, re-bootstrapped from) the same DDL file
- * scripts/openLocal.mjs was given at CLI startup. */
+/** エージェント向けの SQL 実行 API（Issue #27）を公開する Vite dev サーバー
+ * プラグイン: POST /api/query, GET /api/query/state, GET /api/query/health,
+ * POST /api/query/reset。サーバープロセスの生存期間だけ生きる単一の PgEngine
+ * セッションをラップする——ブラウザ自身の PGlite インスタンスとは完全に独立で、
+ * scripts/openLocal.mjs が CLI 起動時に渡されたのと同じ DDL ファイルから
+ * ブートストラップされる（reset 時も同じファイルから再ブートストラップする）。 */
 export function buildQueryApiPlugin(filePath: string): Plugin {
   const engine = new PgEngine();
   let queue: Promise<unknown> = Promise.resolve();
   let bootstrapDone = false;
   let bootstrapError: string | null = null;
 
-  // Runs `task` after every previously-enqueued task settles (success or
-  // failure), so a single PgEngine never executes two statements/resets
-  // concurrently — this is what keeps its internal ctidMap etc. from
-  // corrupting under rapid/overlapping requests from one agent.
+  // 先にエンキューされたタスクがすべて決着（成功でも失敗でも）してから `task` を
+  // 実行する。これにより単一の PgEngine が 2 つの文/リセットを同時に実行することが
+  // 決してなくなる——1 エージェントからの高速/重複したリクエストのもとで内部の
+  // ctidMap 等が壊れないのはこのおかげ。
   function enqueue<T>(task: () => Promise<T>): Promise<T> {
     const result = queue.then(task, task);
     queue = result.then(
@@ -39,9 +39,9 @@ export function buildQueryApiPlugin(filePath: string): Plugin {
     bootstrapError = null;
     try {
       const content = await readDdlFile(filePath);
-      // Runs even for an empty file: run() always calls ensureReady() before
-      // checking whether there are statements to execute, so this still
-      // drives the PGlite cold start GET /api/query/health reports on.
+      // 空ファイルでも実行する: run() は実行すべき文があるか調べる前に必ず
+      // ensureReady() を呼ぶため、これが GET /api/query/health の報告対象である
+      // PGlite のコールドスタートを引き起こす。
       const result = await engine.run(content, WORLD_W, 'design');
       if (result.parseError) {
         bootstrapError = result.parseError;

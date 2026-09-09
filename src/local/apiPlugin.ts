@@ -4,21 +4,20 @@ import { basename, dirname, extname, join } from 'node:path';
 import { errorMessage, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
 
 export interface ApiPluginOptions {
-  /** verify mode: reject POST /api/schema instead of overwriting the target
-   * file. POST /api/schema/verify-save stays available regardless of this
-   * flag — its destination is a separate, server-fixed directory, not the
-   * target file, so it carries none of the risk readOnly guards against. */
+  /** verify モード: 対象ファイルを上書きする代わりに POST /api/schema を拒否する。
+   * POST /api/schema/verify-save はこのフラグに関わらず利用可能——その書き込み先は
+   * 対象ファイルではなくサーバー側で固定された別ディレクトリなので、readOnly が
+   * 防ごうとしているリスクを一切持たない。 */
   readOnly?: boolean;
-  /** Directory POST /api/schema/verify-save writes into. Only meaningful
-   * when the frontend actually calls that endpoint (verify mode); callers
-   * that never enable verify mode may omit it. */
+  /** POST /api/schema/verify-save が書き込むディレクトリ。フロントエンドが実際に
+   * そのエンドポイントを呼ぶ場合（verify モード）にのみ意味を持つ。verify モードを
+   * 有効にしない呼び出し側は省略してよい。 */
   saveDir?: string;
 }
 
-/** Inserts a timestamp before the original file's extension, e.g.
- * "ddl.sql" + 2026-08-26T12:34:56 -> "ddl.2026-08-26T12-34-56.sql". Colons
- * are replaced since they're invalid in filenames on Windows. `now` is
- * injectable for tests. */
+/** 元ファイルの拡張子の前にタイムスタンプを挿入する。例:
+ * "ddl.sql" + 2026-08-26T12:34:56 → "ddl.2026-08-26T12-34-56.sql"。コロンは
+ * Windows のファイル名で不正なため置換する。`now` はテスト用に注入可能。 */
 export function buildVerifySaveFilename(originalFilePath: string, now: Date = new Date()): string {
   const ext = extname(originalFilePath);
   const stem = basename(originalFilePath, ext);
@@ -26,21 +25,21 @@ export function buildVerifySaveFilename(originalFilePath: string, now: Date = ne
   return `${stem}.${timestamp}${ext}`;
 }
 
-/** Vite dev-server plugin exposing GET/POST /api/schema (and, for verify
- * mode, POST /api/schema/verify-save), scoped to a single file path fixed at
- * plugin-construction time (CLI startup) — the path is never accepted from
- * the request, to avoid an arbitrary-file-write vulnerability. Binding the
- * server to 127.0.0.1 is the caller's responsibility
- * (scripts/openLocal.mjs), not this plugin's. */
+/** GET/POST /api/schema（および verify モードでは POST /api/schema/verify-save）を
+ * 公開する Vite dev サーバープラグイン。プラグイン構築時（CLI 起動時）に固定された
+ * 単一のファイルパスにスコープされる——任意ファイル書き込みの脆弱性を避けるため、
+ * パスをリクエストから受け取ることは決してない。サーバーを 127.0.0.1 に
+ * バインドするのは呼び出し側（scripts/openLocal.mjs）の責務であり、このプラグインの
+ * 責務ではない。 */
 export function buildApiPlugin(filePath: string, options: ApiPluginOptions = {}): Plugin {
   const { readOnly = false, saveDir } = options;
   return {
     name: 'sql-viz-local-api',
     configureServer(server: ViteDevServer) {
-      // Connect's use(mountpath, fn) matches any URL starting with
-      // mountpath and rewrites req.url to be relative to it, so both
-      // "/api/schema" and "/api/schema/verify-save" land in this one
-      // handler — subpath is what tells them apart.
+      // Connect の use(mountpath, fn) は mountpath で始まる URL すべてに一致し、
+      // req.url をそこからの相対パスへ書き換える。そのため "/api/schema" と
+      // "/api/schema/verify-save" の両方がこの 1 つのハンドラへ届く——両者を
+      // 区別するのが subpath。
       server.middlewares.use('/api/schema', async (req, res, next) => {
         const subpath = req.url === '/' || !req.url ? '' : req.url;
         try {
