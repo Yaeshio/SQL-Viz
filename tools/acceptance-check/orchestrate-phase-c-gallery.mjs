@@ -52,7 +52,7 @@ async function runDockerPhase(port, tmpDir) {
       try {
         return JSON.parse(lastLine);
       } catch {
-        // fall through
+        // フォールスルー
       }
     }
     throw err;

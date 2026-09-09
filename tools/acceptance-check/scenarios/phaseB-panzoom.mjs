@@ -1,6 +1,6 @@
 import { runScenario } from './runScenario.mjs';
 
-// AppHeader.tsx renders "tables N" as the first `.font-mono.text-slate-200` span.
+// AppHeader.tsx は "tables N" を最初の `.font-mono.text-slate-200` span として描画する。
 const TABLE_COUNT_SELECTOR = 'span.font-mono.text-slate-200';
 const PANE = '[data-testid="canvas-pane"]';
 const FIT_BTN = '[data-testid="fit-view-btn"]';
@@ -29,12 +29,12 @@ async function dragBy(page, from, dx, dy) {
   await page.mouse.up();
 }
 
-/** Issue #34: table headers carry the "sqlviz-drag-handle" class, which
- * react-zoom-pan-pinch's `panning.excluded` skips — a blank-canvas pan drag
- * must not accidentally start on one (this fixture's grid can coincidentally
- * center a table header under the pane's exact midpoint at some scales), or
- * the drag silently does nothing instead of panning. Nudges straight down in
- * header-sized steps until elementFromPoint no longer resolves inside one. */
+/** Issue #34: テーブルヘッダーは "sqlviz-drag-handle" クラスを持ち、
+ * react-zoom-pan-pinch の `panning.excluded` はそれをスキップする——空白キャンバス
+ * のパンドラッグがヘッダー上で誤って開始してはならない（この fixture のグリッドは
+ * スケールによってはたまたまテーブルヘッダーをペインのちょうど中央に置きうる）。
+ * さもないとドラッグはパンせず黙って何もしない。elementFromPoint がヘッダー内を
+ * 指さなくなるまで、ヘッダー分の高さのステップで真下へずらす。 */
 async function findPanSafePoint(page, x, y) {
   for (let i = 0; i < 8; i++) {
     const blocked = await page.evaluate(
@@ -47,10 +47,10 @@ async function findPanSafePoint(page, x, y) {
   return { x, y };
 }
 
-/** Phase B / Issue #17: canvas pan & zoom + fit-to-content button. Drives real
- * wheel/pointer gestures against a fresh sql-studio dev server that has
- * auto-loaded the many-table fixture, and asserts on the data-* attributes
- * Canvas.tsx publishes (data-canvas-scale / -pan-x / -pan-y / -world-w/h). */
+/** Phase B / Issue #17: キャンバスのパン&ズーム + 全体フィットボタン。多数
+ * テーブルの fixture を自動ロードした新しい sql-studio dev サーバーに対して
+ * 実ホイール/ポインタジェスチャーを行い、Canvas.tsx が公開する data-* 属性
+ * （data-canvas-scale / -pan-x / -pan-y / -world-w/h）でアサートする。 */
 export async function run({ page, url, timeout }) {
   const results = [];
 
@@ -60,9 +60,10 @@ export async function run({ page, url, timeout }) {
     TABLE_COUNT_SELECTOR,
     { timeout },
   );
-  // The startup load streams tables in one CREATE at a time; the view auto-fits
-  // as the world grows. Once all 12 tables exist the world box is final, so
-  // wait for the published transform to be a real sub-1x fit of that world.
+  // 起動時ロードはテーブルを 1 CREATE ずつストリーミングし、ワールドが育つのに
+  // 合わせてビューが自動フィットする。12 テーブルすべてが揃うとワールドボックスは
+  // 確定するので、公開される変換がそのワールドに対する実際の 1x 未満のフィットに
+  // なるまで待つ。
   await page.waitForFunction(
     (sel) => {
       const el = document.querySelector(sel);
@@ -101,14 +102,15 @@ export async function run({ page, url, timeout }) {
 
   results.push(
     await runScenario('pan-has-no-snapback', async () => {
-      // At fit scale the scaled world is only a little wider than the pane and
-      // shorter than it — the exact "letterbox" case where the old strict clamp
-      // snapped every nudge back to centre. A moderate drag must mostly stick.
+      // フィット倍率では、スケール後のワールドはペインよりわずかに広く、かつ
+      // 縦は短い——旧来の厳格なクランプがあらゆるずらしを中央へスナップバック
+      // させていた、まさに「レターボックス」のケース。適度なドラッグはほぼ残る
+      // はずである。
       const pane = await paneBox(page);
       const origin = await findPanSafePoint(page, pane.cx, pane.cy);
       const before = await readTransform(page);
       await dragBy(page, origin, 150, 90);
-      await page.waitForTimeout(400); // longer than any clamp snap animation
+      await page.waitForTimeout(400); // クランプのスナップアニメーションより長く
       const after = await readTransform(page);
       const keptX = after.panX - before.panX;
       const keptY = after.panY - before.panY;
@@ -171,8 +173,8 @@ export async function run({ page, url, timeout }) {
 
   results.push(
     await runScenario('pan-is-bounded', async () => {
-      // Shove the same direction well past any sane content edge; the pan offset
-      // must stop advancing (a limit exists) rather than run away forever.
+      // 同じ方向へ、まともなコンテンツ端をはるかに越えて押し込む。パンの
+      // オフセットは無限に暴走せず、進むのを止めねばならない（限界が存在する）。
       const pane = await paneBox(page);
       const origin = await findPanSafePoint(page, pane.cx, pane.cy);
       const readings = [];
@@ -190,7 +192,7 @@ export async function run({ page, url, timeout }) {
       if (drift > 3) {
         throw new Error(`pan did not settle at a bound: last two (${a.panX},${a.panY}) -> (${b.panX},${b.panY})`);
       }
-      // and the world box still overlaps the viewport (never fully lost)
+      // かつワールドボックスはまだビューポートと重なっている（完全には見失わない）
       if (b.panX >= pane.w || b.panY >= pane.h) {
         throw new Error(`world pushed entirely off screen: pan (${b.panX}, ${b.panY}) vs pane ${pane.w}x${pane.h}`);
       }
@@ -203,7 +205,7 @@ export async function run({ page, url, timeout }) {
       const beforeFit = (await readTransform(page)).scale;
       await page.mouse.move(4, 4);
       await page.click(FIT_BTN);
-      // wait for the fit to settle within tolerance across two consecutive reads
+      // 連続する 2 回の読み取りで許容誤差内に収まるまでフィットの収束を待つ
       let stableReads = 0;
       for (let i = 0; i < 25 && stableReads < 2; i++) {
         await page.waitForTimeout(120);

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Host-side orchestrator for the Phase B / Issue #34 (table drag-to-move)
-// acceptance scenario. Same shape as orchestrate-phase-b.mjs: boots a real
-// Vite dev server (the same spawnVite() `npm run sql-studio` uses) against a
-// throwaway copy of the two-table fixture so the app auto-loads a small
-// canvas, then runs the scenario container (built from ./Dockerfile).
+// Phase B / Issue #34（テーブルのドラッグ移動）の受け入れシナリオのホスト側
+// オーケストレーター。orchestrate-phase-b.mjs と同型: 2 テーブルの fixture の
+// 使い捨てコピーに対して実 Vite dev サーバー（`npm run sql-studio` が使う
+// spawnVite() と同じもの）を起動し、アプリが小さいキャンバスを自動ロードする
+// ようにしてから、シナリオコンテナ（./Dockerfile からビルド）を実行する。
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -40,7 +40,7 @@ async function runDockerPhase(phase, port, tmpDir) {
       try {
         return JSON.parse(lastLine);
       } catch {
-        // fall through
+        // フォールスルー
       }
     }
     throw err;

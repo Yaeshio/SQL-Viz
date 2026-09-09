@@ -1,6 +1,6 @@
 import { runScenario } from './runScenario.mjs';
 
-// AppHeader.tsx renders "tables N" as the first `.font-mono.text-slate-200` span.
+// AppHeader.tsx は "tables N" を最初の `.font-mono.text-slate-200` span として描画する。
 const TABLE_COUNT_SELECTOR = 'span.font-mono.text-slate-200';
 const PANE = '[data-testid="canvas-pane"]';
 
@@ -47,19 +47,19 @@ async function dragHandleBy(page, name, dx, dy) {
   await page.mouse.up();
 }
 
-/** Phase B / Issue #34: drag-to-move table nodes. Drives real pointer
- * gestures (header-only, per TableNode.tsx's `data-testid="table-drag-handle"`)
- * against a fresh sql-studio dev server that auto-loaded a two-table fixture,
- * asserting on the world-space `data-x`/`data-y` TableNode.tsx publishes on
- * its `data-testid="table-node"` group and on the pan/zoom data-* attributes
- * Canvas.tsx publishes. Dragging a table never engages the canvas *pan
- * gesture* (the header is excluded from it), but Canvas.tsx does shift the
- * pan transform mid-drag to cancel the SVG viewBox-origin shift a left/up
- * drag causes, so non-dragged tables stay visually fixed and a dragged
- * left/top-most table tracks the cursor instead of looking pinned. The fixture
- * is small enough that the initial fit sits at exactly scale=1
- * (fitToContent caps zoom-in at 1x), so a drag's screen-px delta equals its
- * world-px delta and no scale conversion is needed here. */
+/** Phase B / Issue #34: テーブルノードのドラッグ移動。2 テーブルの fixture を
+ * 自動ロードした新しい sql-studio dev サーバーに対して実ポインタジェスチャー
+ * （ヘッダー限定。TableNode.tsx の `data-testid="table-drag-handle"` に従う）を
+ * 行い、TableNode.tsx が `data-testid="table-node"` グループへ公開する
+ * ワールド座標の `data-x`/`data-y` と、Canvas.tsx が公開するパン/ズームの
+ * data-* 属性でアサートする。テーブルのドラッグはキャンバスの *パン
+ * ジェスチャー* を一切起動しない（ヘッダーはそこから除外されている）が、
+ * Canvas.tsx はドラッグ中にパン変換をずらして、左/上へのドラッグが引き起こす
+ * SVG viewBox 原点のシフトを打ち消す——そのため非ドラッグのテーブルは画面上で
+ * 固定されたまま、ドラッグ中の最左/最上テーブルはピン留めされて見えず
+ * カーソルに追従する。fixture は十分小さく初期フィットがちょうど scale=1 に
+ * なる（fitToContent はズームインを 1x で頭打ちにする）ため、ドラッグの
+ * 画面 px 差分がワールド px 差分と一致し、ここではスケール変換が不要。 */
 export async function run({ page, url, timeout }) {
   const results = [];
 
@@ -100,14 +100,14 @@ export async function run({ page, url, timeout }) {
 
   results.push(
     await runScenario('left-drag-tracks-cursor-and-holds-other-tables-fixed', async () => {
-      // t0 was dragged right/down above; dragging t1 left by 140 now carries it
-      // left past t0, so t1 becomes the left-most table and the world box's
-      // minX starts tracking it. Two things must hold, in every direction
-      // alike: (a) the dragged table keeps following the cursor (it must NOT
-      // look pinned while the canvas grows around it), and (b) every *other*
-      // table stays put on screen — Canvas.tsx shifts the pan transform by the
-      // minX/minY delta to cancel the viewBox-origin shift. Scale is 1 for this
-      // fixture, so screen-px deltas equal the mouse deltas.
+      // t0 は上で右/下へドラッグされた。ここで t1 を左へ 140 ドラッグすると
+      // t1 は t0 を追い越して左へ動き、t1 が最左テーブルになってワールドボックスの
+      // minX がそれを追い始める。どの方向でも同じく次の 2 点が保たれねばならない:
+      // (a) ドラッグ中のテーブルはカーソルに追従し続ける（キャンバスが周囲で
+      // 育つあいだピン留めされて見えてはならない）、(b) *他の* テーブルはすべて
+      // 画面上で静止する——Canvas.tsx が minX/minY の差分だけパン変換をずらして
+      // viewBox 原点のシフトを打ち消す。この fixture では scale は 1 なので、
+      // 画面 px の差分はマウスの差分と一致する。
       const t0Before = await readTableScreenRect(page, 't0');
       const t1Before = await readTableScreenRect(page, 't1');
       const scaleBefore = (await readTransform(page)).scale;

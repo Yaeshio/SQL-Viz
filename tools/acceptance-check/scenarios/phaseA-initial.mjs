@@ -1,17 +1,18 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { runScenario } from './runScenario.mjs';
 
-// AppHeader.tsx renders "tables N" / "rows N" as two `.font-mono.text-slate-200`
-// spans in that order — `.first()` is the tables count.
+// AppHeader.tsx は "tables N" / "rows N" を `.font-mono.text-slate-200` の
+// span 2 つとしてこの順に描画する——`.first()` がテーブル数。
 const TABLE_COUNT_SELECTOR = 'span.font-mono.text-slate-200';
 
 async function tableCountText(page) {
   return page.locator(TABLE_COUNT_SELECTOR).first().innerText();
 }
 
-/** Scenarios 1-3 of Phase A's real-file-I/O acceptance test (see
- * docs/alpha-phase-acceptance-criteria.md). Runs against a schema file that
- * does not exist yet, so this must be the first process to touch it. */
+/** Phase A の実ファイル I/O 受け入れテストのシナリオ 1〜3
+ * （docs/alpha-phase-acceptance-criteria.md 参照）。まだ存在しないスキーマ
+ * ファイルに対して実行するため、このプロセスがそれに触れる最初のものでなければ
+ * ならない。 */
 export async function run({ page, url, schemaPath, timeout }) {
   const results = [];
 
@@ -65,8 +66,8 @@ export async function run({ page, url, schemaPath, timeout }) {
 
   results.push(
     await runScenario('external-edit-and-reload-reflects-new-schema', async () => {
-      // Simulates another process (e.g. a text editor) writing the file
-      // directly, bypassing the app entirely.
+      // 別のプロセス（例: テキストエディタ）がアプリを完全にバイパスして
+      // ファイルを直接書き込む状況をシミュレートする。
       await writeFile(schemaPath, 'CREATE TABLE products (id INT, price INT);\n', 'utf-8');
 
       const responsePromise = page.waitForResponse(
@@ -75,14 +76,14 @@ export async function run({ page, url, schemaPath, timeout }) {
       );
       await page.click('[aria-label="ファイルから再読み込み"]', { timeout });
       await responsePromise;
-      // Reload replays the fetched DDL against the *same* still-live PGlite
-      // session (it isn't a page reload), so "users" from the previous
-      // scenario is still present alongside the newly-loaded "products" —
-      // don't assert an exact table count, just that "products" rendered.
-      // Reload's run({sql: content}) also echoes the loaded DDL back into the
-      // SQL editor textarea, so a bare `text=products` could match that
-      // instead of proving the canvas actually rendered the table — scope to
-      // the canvas SVG specifically.
+      // Reload は取得した DDL を *同じ* 生存中の PGlite セッションに対して
+      // 再生する（ページのリロードではない）ため、前のシナリオの "users" は
+      // 新しく読み込まれた "products" と並んで残っている——正確なテーブル数を
+      // アサートせず、"products" が描画されたことだけを見る。
+      // Reload の run({sql: content}) は読み込んだ DDL を SQL エディタの
+      // textarea にも書き戻すため、素の `text=products` はキャンバスが実際に
+      // テーブルを描画した証拠ではなくそちらに一致し得る——キャンバスの SVG に
+      // スコープを絞る。
       await page.locator('svg').getByText('products', { exact: true }).waitFor({ timeout });
       return 'Reload picked up the externally-edited file';
     }),
