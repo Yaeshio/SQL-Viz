@@ -410,6 +410,13 @@ Dockerイメージ上で実行することでホスト環境を汚染せずに�
 [docs/alpha-phase-acceptance-criteria.md](docs/alpha-phase-acceptance-criteria.md)
 を参照。
 
+同ハーネス内の `orchestrate-phase-c-gallery.mjs`（`--phase=C-gallery`、Issue #54）だけは
+pass/fail判定ではなく、[docs/animation-gallery.md](docs/animation-gallery.md) 用の
+「実行前→実行後」スクリーンショット（`docs/assets/animation/*.png`、約20枚）を
+決定論的に**生成する**のが主目的。SQL対応がIssue #47/#48で拡大し新しい
+`AnimationEvent`・表示挙動が入るたびに、`scenarios/phaseC-gallery.mjs` の `STEPS` へ
+操作を追加して再実行し、`docs/animation-gallery.md` と画像を更新する。
+
 ## CI/CD
 
 `main` 向け PR と `main` への push を対象に、GitHub Actions

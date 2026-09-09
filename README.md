@@ -20,6 +20,9 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
 
 ## できること（現在の実装）
 
+> 各操作の実際の見た目（実行前後のスクリーンショット付き）は
+> [`docs/animation-gallery.md`](docs/animation-gallery.md) を参照してください。
+
 - `CREATE TABLE` — テーブルをキャンバス上にフェードインで生成
 - `INSERT INTO ... VALUES (...)` — 行を1件ずつアニメーション付きで追加
 - 単純な `SELECT col, ... FROM table [WHERE col <op> value]`

@@ -111,16 +111,45 @@ node tools/acceptance-check/orchestrate-phase-b-drag.mjs
    （衝突回避パスの確認）」。
 4. devサーバーを停止し、一時ディレクトリを削除。`{"phase": "B-drag", ..., "ok": bool}` を出力。
 
+## 使い方（Phase C: 表示例ギャラリー生成、Issue #54）
+
+```bash
+# イメージビルドまでは Phase A と同じ
+node tools/acceptance-check/orchestrate-phase-c-gallery.mjs
+```
+
+他フェーズが pass/fail 判定を主目的とするのに対し、Phase C は
+[docs/animation-gallery.md](../../docs/animation-gallery.md) 用の「実行前 → 実行後」
+スクリーンショットを**決定論的に生成する**のが主目的（撮影が全て成功したかの
+pass/fail 判定も兼ねる）。
+
+1. `os.tmpdir()` 配下の使い捨てディレクトリに空の `schema.sql` を作り、それを指す実の
+   `sql-studio` dev サーバーを `spawnVite()` で起動（空キャンバスで始まる）。
+2. `sql-viz-acceptance-check` コンテナ（`--phase=C-gallery`）を実行する。このとき
+   リポジトリの `docs/assets/animation/` を `/out` に bind mount し、`--out-dir=/out` を渡す
+   （コンテナは `--user "$(id -u):$(id -g)"` 相当で実行され、生成 PNG はホスト uid 所有になる）。
+3. シナリオ（`scenarios/phaseC-gallery.mjs`）が 1 ページ内で状態を積み上げながら、
+   `CREATE TABLE` → `ALTER` → `DROP TABLE` → （実験モードへ）`INSERT` → `SELECT` →
+   `UPDATE` → `DELETE` → （設計モードへ復帰し ROLLBACK 差分再生）を順に実行し、
+   各操作の前後で `[data-testid="canvas-pane"]` を撮影する（撮影前に毎回 Fit で
+   ズームを正規化し、framer-motion のトランジション収束を待つ）。
+4. devサーバーを停止し一時ディレクトリを削除。`{"phase": "C-gallery", ..., "ok": bool}` を出力。
+   `docs/assets/animation/*.png`（約20枚）が更新される。
+
+**更新運用**: Issue #47 / #48 等で対応 SQL が拡大したら、`scenarios/phaseC-gallery.mjs` の
+`STEPS` に操作を追加して再実行し、`docs/animation-gallery.md` の該当節と画像を更新する。
+
 ## `run.mjs`（コンテナ側エントリポイント）のCLIオプション
 
 `orchestrate-phase-a.mjs` から内部的に呼ばれるが、単体でも実行できる。
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` / `B-drag` |
+| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` / `B-drag` / `C-gallery` |
 | `--url` | なし（必須） | 対象のsql-studio dev serverのURL |
 | `--schema` | なし（必須） | コンテナ内から見えるスキーマファイルのパス（bind mount先、例: `/workspace/schema.sql`） |
 | `--save-dir` | なし | `A-verify` 専用。検証モードの別名保存先（bind mount先、例: `/workspace/verify-saves`） |
+| `--out-dir` | なし | `C-gallery` 専用。生成スクリーンショットの出力ディレクトリ（bind mount先、例: `/out`） |
 | `--out` | なし | JSON結果を標準出力に加えてファイルにも書き出す場合のパス |
 | `--timeout` | `15000` | 各操作のタイムアウト（ミリ秒） |
 
