@@ -8,6 +8,7 @@ const { values } = parseArgs({
     url: { type: 'string' },
     schema: { type: 'string' },
     'save-dir': { type: 'string' },
+    'out-dir': { type: 'string' },
     out: { type: 'string' },
     timeout: { type: 'string', default: '15000' },
   },
@@ -15,7 +16,7 @@ const { values } = parseArgs({
 
 if (!values.phase || !values.url || !values.schema) {
   process.stderr.write(
-    'Usage: node run.mjs --phase=<A-initial|A-restart|A-verify|B-panzoom|B-drag> --url=<http://host:port/> --schema=</workspace/schema.sql> [--save-dir=</workspace/verify-saves>] [--out=<path>] [--timeout=15000]\n',
+    'Usage: node run.mjs --phase=<A-initial|A-restart|A-verify|B-panzoom|B-drag|C-gallery> --url=<http://host:port/> --schema=</workspace/schema.sql> [--save-dir=</workspace/verify-saves>] [--out-dir=</out>] [--out=<path>] [--timeout=15000]\n',
   );
   process.exit(2);
 }
@@ -29,7 +30,14 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 let scenarios;
 try {
-  scenarios = await run({ page, url: values.url, schemaPath: values.schema, saveDir: values['save-dir'], timeout });
+  scenarios = await run({
+    page,
+    url: values.url,
+    schemaPath: values.schema,
+    saveDir: values['save-dir'],
+    outDir: values['out-dir'],
+    timeout,
+  });
 } catch (err) {
   scenarios = [{ name: 'unexpected-runner-error', pass: false, detail: String(err) }];
 } finally {
