@@ -181,8 +181,8 @@ describe('main', () => {
       expect.stringContaining('/schema/ddl.sql'),
       { readOnly: false, saveDir: undefined },
     );
-    // SQL_STUDIO_HOST unset → spawnVite's default 127.0.0.1 (regression guard
-    // for the non-Docker path).
+    // SQL_STUDIO_HOST 未設定 → spawnVite の既定 127.0.0.1（非 Docker 経路の
+    // リグレッションガード）。
     expect(createServer.mock.calls[0][0].server).toEqual(
       expect.objectContaining({ host: '127.0.0.1', open: false }),
     );

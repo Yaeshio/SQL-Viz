@@ -44,9 +44,9 @@ function makeRes(): FakeRes {
 function getHandler(filePath: string, options?: ApiPluginOptions): Connect.NextHandleFunction {
   const use = vi.fn();
   const plugin = buildApiPlugin(filePath, options);
-  // configureServer is declared as an ObjectHook<ServerHook> in Vite's Plugin
-  // type, but buildApiPlugin always assigns it a plain function. A fake
-  // server exposing only `middlewares.use` is all that function needs.
+  // configureServer は Vite の Plugin 型では ObjectHook<ServerHook> として
+  // 宣言されているが、buildApiPlugin は常にそれへ素の関数を代入する。その関数が
+  // 必要とするのは `middlewares.use` だけを公開する偽サーバーで十分。
   const configureServer = plugin.configureServer as unknown as (server: {
     middlewares: { use: typeof use };
   }) => void;

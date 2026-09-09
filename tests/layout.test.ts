@@ -47,7 +47,7 @@ describe('layoutTables — 列数と折り返し（非immutableな関数）', ()
 
     layoutTables(state, canvasW);
 
-    // t0: col0/row0, t1: col1/row0, t2: col0/row1
+    // t0: col0/row0、t1: col1/row0、t2: col0/row1
     expect(state.tables.t0.x).toBe(PAD);
     expect(state.tables.t1.x).toBe(PAD + (TABLE_W + TABLE_GAP_X));
     expect(state.tables.t2.x).toBe(PAD);
@@ -83,8 +83,8 @@ describe('layoutTables — 同一行内の高さ計算（特性テスト）', ()
     const state = makeState([
       tableWithShape('t0', 1, 0),
       tableWithShape('t1', 1, 0),
-      tableWithShape('short', 1, 0), // row1, col0
-      tableWithShape('tall', 1, 5), // row1, col1
+      tableWithShape('short', 1, 0), // row1、col0
+      tableWithShape('tall', 1, 5), // row1、col1
     ]);
     const canvasW = 650; // cols = 2
     layoutTables(state, canvasW);

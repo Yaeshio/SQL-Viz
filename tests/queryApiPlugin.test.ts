@@ -6,10 +6,9 @@ vi.mock('node:fs/promises', () => ({ readFile }));
 
 import { buildQueryApiPlugin } from '../src/local/queryApiPlugin';
 
-// req.url here is what Connect would deliver AFTER stripping the '/api/query'
-// mount prefix (confirmed in the implementation plan by reading Vite's
-// vendored connect source) — e.g. '/' for POST /api/query itself, '/state'
-// for GET /api/query/state.
+// ここでの req.url は、Connect が '/api/query' のマウントプレフィックスを剥がした
+// あとに渡すもの（Vite に同梱された connect のソースを読んで実装計画で確認済み）
+// ——例: POST /api/query 自体には '/'、GET /api/query/state には '/state'。
 function makeReq(method: string, url: string, body?: string): Connect.IncomingMessage {
   async function* chunks() {
     if (body) yield Buffer.from(body, 'utf-8');
@@ -195,9 +194,9 @@ describe('buildQueryApiPlugin', () => {
     const reqA = makeReq('POST', '/', JSON.stringify({ sql: 'CREATE TABLE race (id INT)', mode: 'design' }));
     const reqB = makeReq('POST', '/', JSON.stringify({ sql: 'ALTER TABLE race ADD COLUMN note TEXT', mode: 'design' }));
 
-    // Fired without awaiting the first — if requests were NOT serialized,
-    // reqB's ALTER could race ahead of reqA's CREATE and fail with
-    // "relation race does not exist".
+    // 最初のを await せずに発火する——リクエストが直列化されていなければ、
+    // reqB の ALTER が reqA の CREATE を追い越して
+    // "relation race does not exist" で失敗しうる。
     await Promise.all([handler(reqA, resA as never, vi.fn()), handler(reqB, resB as never, vi.fn())]);
 
     expect(JSON.parse(resA.body).results[0].error).toBeUndefined();
