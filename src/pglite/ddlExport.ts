@@ -25,11 +25,11 @@ function formatColumnType(col: InformationSchemaColumn): string {
 }
 
 /**
- * Generates CREATE TABLE DDL for the given tables, in `order`, from PGlite's
- * information_schema — not from DBState — so precision that normalizeType()
- * rounds away (e.g. VARCHAR(50)'s length) survives the export
- * (mode-and-sql-scope-spec.md 3節). Constraints (PK/FK/NOT NULL/DEFAULT) are
- * out of MVP scope, matching the same section.
+ * 与えられたテーブルの CREATE TABLE DDL を `order` の順で、DBState からではなく
+ * PGlite の information_schema から生成する。そのため normalizeType() が丸めて
+ * 落としてしまう精度（例: VARCHAR(50) の長さ）がエクスポートに残る
+ * （mode-and-sql-scope-spec.md 3節）。制約（PK/FK/NOT NULL/DEFAULT）は同節のとおり
+ * MVP スコープ外。
  */
 export async function generateDdl(db: PGlite, order: string[]): Promise<string> {
   const statements: string[] = [];

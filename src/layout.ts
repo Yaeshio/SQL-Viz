@@ -8,11 +8,11 @@ export const TABLE_GAP_X = 48;
 export const TABLE_GAP_Y = 56;
 export const PAD = 24;
 
-/** Fixed wrap width for the world coordinate system (Issue #17). Table
- * positions are laid out against this constant, not the live viewport width,
- * so the canvas can be panned/zoomed without tables reflowing and so the
- * browser and the query-API server produce identical layouts. Sized for a
- * 5-column grid: floor((WORLD_W - PAD) / (TABLE_W + TABLE_GAP_X)) === 5. */
+/** ワールド座標系の固定折り返し幅（Issue #17）。テーブル位置はライブの
+ * ビューポート幅ではなくこの定数を基準に配置される。そのためキャンバスを
+ * パン/ズームしてもテーブルが再フローせず、ブラウザとクエリ API サーバーが
+ * 同一のレイアウトを生成する。5 列グリッド用のサイズ:
+ * floor((WORLD_W - PAD) / (TABLE_W + TABLE_GAP_X)) === 5。 */
 export const WORLD_W = 1680;
 
 interface Rect {
@@ -22,9 +22,9 @@ interface Rect {
   h: number;
 }
 
-/** AABB overlap test, inflated by half the standard table gaps so an
- * auto-placed table keeps its usual breathing room around an obstacle
- * instead of merely not touching it. */
+/** AABB（軸平行境界ボックス, axis-aligned bounding box）による重なり判定。
+ * 標準のテーブル間ギャップの半分だけ膨らませることで、自動配置されたテーブルが
+ * 障害物に「触れないだけ」ではなく通常どおりの余白を保つようにする。 */
 function rectsOverlap(a: Rect, b: Rect): boolean {
   const mx = TABLE_GAP_X / 2;
   const my = TABLE_GAP_Y / 2;
@@ -32,16 +32,15 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
 }
 
 /**
- * Assign x/y positions to tables in a flowing grid. Tables flagged
- * `manuallyPositioned` (Issue #34 — user has dragged them) are left
- * untouched and excluded from the grid computation entirely; the remaining
- * (auto) tables, including newly created ones, tighten around the gap they'd
- * otherwise leave. Each auto table's grid candidate is then nudged straight
- * down, one table at a time in `state.order` order, until it no longer
- * overlaps any manually-positioned table or any auto table already placed
- * earlier in this same pass — so a new table never spawns on top of a table
- * the user has dragged off-grid. With no manually-positioned tables present
- * this nudge never triggers, so output is unchanged from before Issue #34.
+ * 折り返しグリッドにテーブルの x/y 位置を割り当てる。`manuallyPositioned`
+ * フラグの付いたテーブル（Issue #34 — ユーザーがドラッグしたもの）はそのまま
+ * 残し、グリッド計算からは完全に除外する。残りの（自動）テーブルは新規作成分も
+ * 含め、除外分が空けるはずだった隙間を作らず詰めて配置される。次に各自動テーブルの
+ * グリッド候補位置を、`state.order` の順に 1 つずつ、手動配置テーブルおよびこの
+ * 同一パスで先に配置済みの自動テーブルのいずれとも重ならなくなるまで真下へ
+ * ずらす——そのため新規テーブルがユーザーのグリッド外へドラッグしたテーブルの
+ * 上に出現することは決してない。手動配置テーブルが 1 つも無ければこのずらしは
+ * 発動しないので、出力は Issue #34 以前と変わらない。
  */
 export function layoutTables(state: DBState, canvasW: number): DBState {
   const cols = Math.max(1, Math.floor((canvasW - PAD) / (TABLE_W + TABLE_GAP_X)));

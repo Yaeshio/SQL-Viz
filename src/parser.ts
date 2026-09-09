@@ -1,7 +1,7 @@
-// Default import + runtime destructure (not a named import): node-sql-parser
-// is a plain CJS package with no "exports" map, and Node's native ESM loader
-// (used when scripts/openLocal.mjs runs outside Vite's bundler resolution)
-// can't always statically detect named CJS exports the way Vite/esbuild does.
+// デフォルト import + 実行時の分割代入（名前付き import ではない）: node-sql-parser
+// は "exports" マップを持たない素の CJS パッケージで、Node のネイティブ ESM ローダー
+// （scripts/openLocal.mjs が Vite のバンドラ解決の外で動くときに使われる）は、
+// Vite/esbuild のようには名前付き CJS エクスポートを常に静的検出できるとは限らない。
 import pkg from 'node-sql-parser';
 const { Parser } = pkg;
 import type { Column, WhereClause } from './types';
@@ -29,7 +29,7 @@ export interface ParsedInsert extends ParsedStatement {
 export interface ParsedSelect extends ParsedStatement {
   type: 'select';
   table: string;
-  columns: string[]; // ['*'] for SELECT *
+  columns: string[]; // SELECT * の場合は ['*']
   where: WhereClause | null;
 }
 
@@ -70,22 +70,22 @@ export interface ParsedDelete extends ParsedStatement {
 export type Parsed = ParsedCreate | ParsedInsert | ParsedSelect | ParsedAlter | ParsedDrop | ParsedUpdate | ParsedDelete;
 
 /**
- * Thrown when a statement matches a supported statement type (create/insert/select)
- * but contains a clause/shape outside the supported subset. Caught in parseSql() and
- * turned into a top-level parse error, the same way an unsupported statement type is.
- * This is deliberately an allowlist (only the known-supported shape passes) rather than
- * a blocklist of named unsupported clauses, so constructs that were never enumerated
- * (e.g. UNION) fail loudly instead of being silently ignored.
+ * 文が対応する文種（create/insert/select）に一致するものの、対応サブセット外の
+ * 句/形を含むときに throw される。parseSql() で捕捉され、対応しない文種と同じく
+ * トップレベルのパースエラーへ変換される。
+ * これは意図的に許可リスト方式（既知の対応形のみ通す）であり、名前を挙げた
+ * 非対応句のブロックリストではない——そのため列挙されていない構文（例: UNION）は
+ * 黙って無視されず、明示的に失敗する。
  */
 class UnsupportedClauseError extends Error {}
 
 /**
- * Under the PostgreSQL dialect, node-sql-parser represents several unset clauses
- * (DISTINCT, LIMIT) as populated-but-empty objects (e.g. `{ type: null }`,
- * `{ seperator: '', value: [] }`) rather than `null` as in the default dialect.
- * Recurse into plain objects/strings so these still count as empty for gating,
- * while an object with any genuinely populated field (e.g. an actual LIMIT
- * value) still correctly counts as non-empty.
+ * PostgreSQL 方言では、node-sql-parser はいくつかの未設定の句（DISTINCT、LIMIT）を、
+ * デフォルト方言のような `null` ではなく「値は入っているが空」のオブジェクト
+ * （例: `{ type: null }`、`{ seperator: '', value: [] }`）として表現する。
+ * プレーンなオブジェクト/文字列へ再帰することで、これらもゲート判定上は空として
+ * 数え、一方で本当に値の入ったフィールド（例: 実際の LIMIT 値）を持つオブジェクトは
+ * 引き続き正しく非空として数える。
  */
 function isEmpty(value: unknown): boolean {
   if (value === null || value === undefined || value === '') return true;
@@ -102,10 +102,11 @@ function assertNoExtraClauses(node: Record<string, unknown>, allowed: Set<string
 }
 
 /**
- * Under the PostgreSQL dialect, node-sql-parser wraps identifier names (column_ref.column,
- * an INSERT column list entry) in a nested `{ value: '...' }` or `{ expr: { value: '...' } }`
- * shape instead of the flat string used elsewhere (e.g. the default dialect, or the `'*'`
- * of `SELECT *`). Unwrap either shape down to the plain identifier string.
+ * PostgreSQL 方言では、node-sql-parser は識別子名（column_ref.column、INSERT の
+ * カラムリストの要素）を、他の箇所で使われるフラットな文字列（例: デフォルト方言、
+ * あるいは `SELECT *` の `'*'`）ではなく、ネストした `{ value: '...' }` または
+ * `{ expr: { value: '...' } }` の形で包む。どちらの形もプレーンな識別子文字列まで
+ * 剥がす。
  */
 function identName(node: unknown): string {
   if (typeof node === 'string') return node;
@@ -118,7 +119,7 @@ function litValue(v: { type: string; value: unknown }): string | number | boolea
   if (v.type === 'null') return null;
   if (v.type === 'bool' || v.type === 'boolean') return v.value === 'true' || v.value === true;
   if (v.type === 'number') return Number(v.value);
-  // single_quote_string, double_quote_string, string, etc.
+  // single_quote_string、double_quote_string、string など
   return String(v.value);
 }
 
@@ -177,7 +178,7 @@ export function parseSql(sql: string): { statements: Parsed[]; error?: string } 
   try {
     for (const item of list) {
       const root = (item as { ast?: unknown }).ast ?? item;
-      // For multiple statements, .ast is itself an array of statement nodes
+      // 複数文の場合、.ast 自体が文ノードの配列になる
       const stmts = Array.isArray(root) ? root : [root];
       for (const snode of stmts) {
         const node = snode as Record<string, unknown> & { type?: string; keyword?: string };

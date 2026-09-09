@@ -1,7 +1,7 @@
 export type ColumnType = 'INT' | 'VARCHAR' | 'TEXT' | 'BOOLEAN' | 'DATE' | 'UNKNOWN';
 
-/** design: structural edits (CREATE/ALTER/DROP TABLE). experiment: data-only
- * reads/writes (SELECT/INSERT/UPDATE/DELETE) against a fixed schema. */
+/** design: 構造の編集（CREATE/ALTER/DROP TABLE）。experiment: 固定スキーマに
+ * 対するデータのみの読み書き（SELECT/INSERT/UPDATE/DELETE）。 */
 export type AppMode = 'design' | 'experiment';
 
 export interface Column {
@@ -12,7 +12,7 @@ export interface Column {
 export interface Row {
   id: string;
   values: Record<string, string | number | boolean | null>;
-  /** true when filtered out by the most recent SELECT WHERE clause */
+  /** 直近の SELECT の WHERE 句によって絞り込みで除外されているとき true */
   filteredOut?: boolean;
 }
 
@@ -20,25 +20,25 @@ export interface Table {
   name: string;
   columns: Column[];
   rows: Row[];
-  /** grid position assigned by layout engine, unless manuallyPositioned */
+  /** manuallyPositioned でない限り、レイアウトエンジンが割り当てるグリッド位置 */
   x: number;
   y: number;
-  /** true once the user has dragged this table (Issue #34); layoutTables()
-   * then leaves x/y untouched instead of reassigning a grid position. */
+  /** ユーザーがこのテーブルを一度でもドラッグしたら true（Issue #34）。以降
+   * layoutTables() はグリッド位置を再割り当てせず x/y をそのまま残す。 */
   manuallyPositioned?: boolean;
 }
 
 export interface DBState {
   tables: Record<string, Table>;
-  /** ordered list of table names for layout */
+  /** レイアウト用に順序付けられたテーブル名のリスト */
   order: string[];
-  /** the last executed statement, used to drive SELECT highlighting */
+  /** 直近に実行された SELECT 文。SELECT ハイライトの駆動に使う */
   lastSelect: {
     table: string;
-    columns: string[]; // empty = all columns (SELECT *)
+    columns: string[]; // 空 = 全カラム（SELECT *）
     where: WhereClause | null;
   } | null;
-  /** monotonically increasing version, bumped on every applied statement */
+  /** 単調増加するバージョン。適用された文ごとにインクリメントされる */
   version: number;
 }
 
