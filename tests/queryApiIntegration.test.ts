@@ -11,13 +11,13 @@ import { spawnVite } from '../scripts/openLocal.mjs';
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// Real end-to-end round trip for Issue #27's HTTP API + CLI (as pre-decided
-// in docs/alpha-phase-acceptance-criteria.md — this issue has no browser
-// component, so its acceptance test belongs here, not in
-// tools/acceptance-check). Boots a genuine dev server (same spawnVite()
-// tools/acceptance-check/orchestrate-phase-a.mjs already uses this way)
-// against a throwaway temp directory, and spawns scripts/query.mjs as a real
-// child process against it.
+// Issue #27 の HTTP API + CLI の実エンドツーエンドのラウンドトリップ
+// （docs/alpha-phase-acceptance-criteria.md で事前決定済み——この Issue には
+// ブラウザ要素が無いので、その受け入れテストは tools/acceptance-check ではなく
+// ここに属する）。本物の dev サーバーを起動し（tools/acceptance-check/
+// orchestrate-phase-a.mjs が既にこの方法で使っているのと同じ spawnVite()）、
+// 使い捨ての一時ディレクトリに対して scripts/query.mjs を実際の子プロセスとして
+// spawn する。
 
 async function waitForHealthy(url: string, timeoutMs = 15000): Promise<void> {
   const start = Date.now();
@@ -29,7 +29,7 @@ async function waitForHealthy(url: string, timeoutMs = 15000): Promise<void> {
         if (ready) return;
       }
     } catch {
-      // server not accepting connections yet
+      // サーバーはまだ接続を受け付けていない
     }
     if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${url}api/query/health`);
     await new Promise((r) => setTimeout(r, 20));
@@ -71,7 +71,7 @@ describe('agent query API — real server + real CLI subprocess', () => {
     'QUERY-INT-01: HTTP API — health/query/state/resetの実往復',
     async () => {
       tmpDir = await mkdtemp(path.join(tmpdir(), 'sql-viz-query-api-'));
-      const schemaPath = path.join(tmpDir, 'schema.sql'); // deliberately not pre-created
+      const schemaPath = path.join(tmpDir, 'schema.sql'); // 意図的に事前作成しない
 
       server = await spawnVite({ filePath: schemaPath, port: undefined });
       const url = server.resolvedUrls!.local[0];
@@ -95,7 +95,7 @@ describe('agent query API — real server + real CLI subprocess', () => {
       expect(await resetRes.json()).toEqual({ ok: true, error: null });
 
       const afterResetState = await (await fetch(`${url}api/query/state`)).json();
-      expect(afterResetState.state.order).toEqual([]); // schema file was empty/absent
+      expect(afterResetState.state.order).toEqual([]); // スキーマファイルは空/不在だった
     },
     60000,
   );
@@ -113,12 +113,11 @@ describe('agent query API — real server + real CLI subprocess', () => {
       const create = await runCli(['CREATE TABLE users (id INT)', `--url=${url.replace(/\/$/, '')}`]);
       expect(create.code).toBe(0);
       expect(create.stdout.trim()).not.toBe('');
-      const parsed = JSON.parse(create.stdout); // must be JSON.parse-able as-is
+      const parsed = JSON.parse(create.stdout); // そのまま JSON.parse できなければならない
       expect(parsed.results[0].error).toBeUndefined();
 
-      // A statement disallowed in the session's current mode: the CLI still
-      // reports it as exit code 1 (SQL execution error), and stdout is still
-      // pure JSON.
+      // セッションの現在のモードで許可されない文: CLI はそれを引き続き exit code 1
+      // （SQL 実行エラー）として報告し、stdout は依然として純粋な JSON。
       const modeViolation = await runCli(['SELECT * FROM users', `--url=${url.replace(/\/$/, '')}`, '--mode=design']);
       expect(modeViolation.code).toBe(1);
       const violationBody = JSON.parse(modeViolation.stdout);
@@ -149,13 +148,14 @@ describe('agent query API — real server + real CLI subprocess', () => {
       const bad = await post('INSERT INTO ghost (x) VALUES (1)', 'experiment');
       expect(bad.results[0].error).toBe('relation "ghost" does not exist');
 
-      // Before the SAVEPOINT fix this failed with
-      // "current transaction is aborted, commands ignored until end of transaction block".
+      // SAVEPOINT 修正の前は、これは
+      // "current transaction is aborted, commands ignored until end of transaction block"
+      // で失敗していた。
       const recovered = await post('SELECT * FROM users', 'experiment');
       expect(recovered.parseError).toBeUndefined();
       expect(recovered.results[0].error).toBeUndefined();
 
-      // A design-mode statement after the experiment error also works again.
+      // experiment のエラー後の design モードの文も、再び動作する。
       const alter = await post('ALTER TABLE users ADD COLUMN age INT', 'design');
       expect(alter.results[0].error).toBeUndefined();
     },

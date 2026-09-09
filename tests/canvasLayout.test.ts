@@ -159,7 +159,7 @@ describe('clampPan — ワールドを（ほぼ）画面外へパンさせない
   });
 
   it('CLAMP-02: パン端では keepVisible 分だけワールドを画面内に残す', () => {
-    // X: content 2000 > view 800 -> pos ∈ [k-2000, 800-k]
+    // X: コンテンツ 2000 > ビュー 800 → pos ∈ [k-2000, 800-k]
     const far = clampPan({ scale: 1, positionX: -99999, positionY: -99999 }, viewport, world);
     expect(far.positionX).toBe(k - 2000);
     expect(far.positionY).toBe(k - 1000);
@@ -176,15 +176,15 @@ describe('clampPan — ワールドを（ほぼ）画面外へパンさせない
       positionX: 60,
       positionY: 60,
     });
-    // X: content 400 -> keep = min(140,400,800)=140 -> pos ∈ [140-400, 800-140] = [-260, 660]
+    // X: コンテンツ 400 → keep = min(140,400,800)=140 → pos ∈ [140-400, 800-140] = [-260, 660]
     const far = clampPan({ scale: 0.2, positionX: -9999, positionY: -9999 }, viewport, world);
     expect(far.positionX).toBe(140 - 400);
-    // Y: content 200 -> keep=min(140,200,600)=140 -> min = 140-200 = -60
+    // Y: コンテンツ 200 → keep=min(140,200,600)=140 → min = 140-200 = -60
     expect(far.positionY).toBe(140 - 200);
   });
 
   it('CLAMP-04: keepVisible は引数で上書きできる', () => {
     const r = clampPan({ scale: 1, positionX: 99999, positionY: 0 }, viewport, world, 0);
-    expect(r.positionX).toBe(800); // keep 0 -> world can be pushed to just touching the edge
+    expect(r.positionX).toBe(800); // keep 0 → ワールドを端にちょうど接するところまで押せる
   });
 });
