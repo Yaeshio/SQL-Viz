@@ -7,8 +7,8 @@ export interface TableInnerLayout {
   height: number;
 }
 
-/** Computes the y offsets of a table card's column-definition rows and data
- * rows, plus the card's total height. */
+/** テーブルカードのカラム定義行・データ行の y オフセットと、カードの総高さを
+ * 計算する。 */
 export function computeTableInnerLayout(table: Table): TableInnerLayout {
   let y = HEADER_H;
   const colRows = table.columns.map((c) => {
@@ -28,14 +28,14 @@ export function computeTableInnerLayout(table: Table): TableInnerLayout {
 
 export interface RowCellLayout {
   columnName: string;
-  /** x position of the divider line preceding this cell, or null for the first column. */
+  /** このセルの手前の区切り線の x 位置。先頭カラムでは null。 */
   dividerX: number | null;
   textX: number;
   display: string;
   isNull: boolean;
 }
 
-/** Computes per-cell x positions and truncated display text for one data row. */
+/** 1 データ行分の、セルごとの x 位置と切り詰めた表示テキストを計算する。 */
 export function computeRowCells(columns: Column[], row: Row): RowCellLayout[] {
   const cellPad = 8;
   const colW = (TABLE_W - cellPad * 2) / columns.length;
@@ -56,39 +56,36 @@ export function computeRowCells(columns: Column[], row: Row): RowCellLayout[] {
 }
 
 export interface WorldBox {
-  /** world-space x/y of the box's top-left corner. Exactly 0 unless a
-   * manually-positioned table (Issue #34 drag) sits left of/above the
-   * origin, in which case it's negative — the SVG viewBox is offset to
-   * match so the canvas can grow left/up as well as right/down. */
+  /** ボックスの左上隅のワールド座標 x/y。手動配置されたテーブル（Issue #34 の
+   * ドラッグ）が原点より左/上に無い限りぴったり 0 で、ある場合は負になる——
+   * SVG の viewBox もそれに合わせてオフセットされ、キャンバスが右/下だけでなく
+   * 左/上へも広がれるようにする。 */
   minX: number;
   minY: number;
   width: number;
   height: number;
 }
 
-/** Blank space (px, world units) kept around the table bounding box, so the
- * "Fit" view has a little breathing room and there is somewhere to pan to. */
+/** テーブルの外接矩形の周囲に確保する空白（px、ワールド単位）。「Fit」表示に
+ * 少し余白を持たせ、パンできる先を用意するため。 */
 export const WORLD_MARGIN = 96;
 
-/** Minimum px of the world box that clampPan() keeps on screen on each axis at
- * the pan limit. Larger than WORLD_MARGIN so at least a sliver of a real table
- * (not just the blank margin) always stays visible. */
+/** パン限界において clampPan() が各軸で画面内に残すワールドボックスの最小 px。
+ * WORLD_MARGIN より大きくすることで、単なる空白マージンではなく実テーブルの
+ * 一部が必ず見えるようにする。 */
 export const KEEP_VISIBLE = 140;
 
-/** Minimum world size so a near-empty canvas still fills a sensible area. */
+/** ほぼ空のキャンバスでも妥当な広さを埋めるためのワールドの最小サイズ。 */
 const MIN_WORLD_W = 800;
 const MIN_WORLD_H = 500;
 
-/** Computes the world-space box (the SVG's pixel width/height, plus a
- * top-left origin) that tightly wraps every table's real card rectangle with
- * `margin` of blank space on all four sides, clamped to a minimum size.
- * Deliberately does NOT special-case the world origin (0,0) as an implicit
- * lower bound — every edge (left/top as much as right/bottom) is computed
- * the same way, purely from the tables' own current positions, so a table
- * dragged toward any edge (Issue #34) gets the same continuous, proactive
- * `margin`-px cushion in every direction instead of only right/down. Pure
- * geometry — the pan/zoom transform is applied on top of this by
- * Canvas.tsx. */
+/** すべてのテーブルの実カード矩形を四辺すべてに `margin` の空白を付けてぴったり
+ * 包む、ワールド座標のボックス（SVG のピクセル幅/高さ + 左上原点）を計算し、
+ * 最小サイズにクランプする。ワールド原点 (0,0) を暗黙の下限として特別扱い
+ * しない——左/上も右/下と同じく、あらゆる辺をテーブル自身の現在位置のみから
+ * 同じ方法で計算する。そのため、いずれかの辺へドラッグされたテーブル（Issue #34）は
+ * 右/下だけでなく全方向で同じ連続的・先回りの `margin` px のクッションを得る。
+ * 純粋な幾何計算——パン/ズーム変換は Canvas.tsx がこの上に適用する。 */
 export function computeWorldBox(tables: Table[], margin: number = WORLD_MARGIN): WorldBox {
   if (tables.length === 0) {
     return { minX: 0, minY: 0, width: MIN_WORLD_W, height: MIN_WORLD_H };
@@ -115,17 +112,17 @@ export interface FitTransform {
 
 export interface FitOptions {
   minScale?: number;
-  /** Never zoom in past this when fitting (default 1 — don't magnify a small canvas). */
+  /** フィット時にこれを超えてズームインしない（既定 1 — 小さいキャンバスを拡大しない）。 */
   maxScale?: number;
-  /** Inset kept between the world box and the viewport edge, in screen px. */
+  /** ワールドボックスとビューポート端の間に確保する余白（画面 px）。 */
   padding?: number;
 }
 
-/** Computes the react-zoom-pan-pinch transform ({scale, positionX, positionY})
- * that centers `world` inside `viewport` and scales it to fit within `padding`
- * of every edge. Pure geometry so it can be unit-tested and so the initial fit
- * and the "Fit" button share one code path (no dependency on the live SVG
- * bounding box or framer-motion's in-flight enter animation). */
+/** `world` を `viewport` の中央に置き、全辺の `padding` 内に収まるようスケール
+ * する react-zoom-pan-pinch の変換（{scale, positionX, positionY}）を計算する。
+ * 純粋な幾何計算なので単体テストでき、初期フィットと「Fit」ボタンが 1 つの
+ * コードパスを共有できる（ライブの SVG 外接矩形や framer-motion の再生中の
+ * 入場アニメーションに依存しない）。 */
 export function computeFitTransform(
   viewport: { width: number; height: number },
   world: WorldBox,
@@ -142,15 +139,15 @@ export function computeFitTransform(
   };
 }
 
-/** Clamps a pan offset so the world box can't be dragged (almost) off screen:
- * at the limit, `keepVisible` px of the scaled world box stays inside the
- * viewport on each axis. This is a *loose* bound — within it the view moves
- * freely, so there is no snap-back right at the content edge — while still
- * enforcing Issue #17's "can't pan past the bounding box + margin" (you can
- * never lose the canvas entirely). react-zoom-pan-pinch runs with
- * limitToBounds disabled (its bounds forbid the letterboxing that "fit all
- * tables" needs); Canvas.tsx re-applies this on gesture-stop instead. Pure
- * geometry. */
+/** ワールドボックスが（ほぼ）画面外へドラッグされないよう、パンオフセットを
+ * クランプする: 限界では、スケール後のワールドボックスの `keepVisible` px が
+ * 各軸でビューポート内に残る。これは *緩い* 制限で——その範囲内ではビューは
+ * 自由に動くのでコンテンツ端での跳ね返りが無い——それでいて Issue #17 の
+ * 「外接矩形 + margin を越えてパンできない」（キャンバスを完全に見失うことは
+ * 決してない）を担保する。react-zoom-pan-pinch は limitToBounds を無効にして
+ * 動作する（そのバウンドは「全テーブルにフィット」が必要とするレターボックス
+ * 表示を禁じてしまう）。代わりに Canvas.tsx がジェスチャー終了時にこれを
+ * 再適用する。純粋な幾何計算。 */
 export function clampPan(
   transform: { scale: number; positionX: number; positionY: number },
   viewport: { width: number; height: number },
@@ -159,9 +156,9 @@ export function clampPan(
 ): { positionX: number; positionY: number } {
   const axis = (pos: number, content: number, view: number) => {
     const keep = Math.min(keepVisible, content, view);
-    const min = keep - content; // world's far edge stays `keep` inside the near viewport edge
-    const max = view - keep; // world's near edge stays `keep` inside the far viewport edge
-    if (min > max) return (view - content) / 2; // viewport smaller than 2*keep — just center
+    const min = keep - content; // ワールドの遠い端が、近いビューポート端から `keep` 内側に残る
+    const max = view - keep; // ワールドの近い端が、遠いビューポート端から `keep` 内側に残る
+    if (min > max) return (view - content) / 2; // ビューポートが 2*keep より小さい——単に中央寄せ
     return Math.min(max, Math.max(min, pos));
   };
   return {

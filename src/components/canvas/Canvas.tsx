@@ -9,30 +9,30 @@ import { clampPan, computeFitTransform, computeWorldBox } from '../../lib/canvas
 import TableNode from './TableNode';
 import type { CanvasHighlight } from './TableNode';
 
-/** wraps exactly the table nodes (no grid/margin) — kept as a stable hook for
- * tests to measure the real content rect. */
+/** テーブルノードだけをぴったり包む（グリッド/マージンを含まない）——テストが
+ * 実コンテンツ矩形を測るための安定したフックとして残している。 */
 const TABLES_BOUNDS_ID = 'sqlviz-tables-bounds';
 
-/** Screen-px inset kept between the world box and the viewport edge on "Fit". */
+/** 「Fit」時にワールドボックスとビューポート端の間に確保する余白（画面 px）。 */
 const FIT_PADDING = 24;
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 4;
 
 interface Props {
-  /** the CanvasPane <section>; transform state is published here as data-* attrs */
+  /** CanvasPane の <section>。変換状態を data-* 属性としてここに公開する */
   paneRef: RefObject<HTMLElement>;
   state: DBState;
-  /** ids of rows that should currently animate in (added this tick) */
+  /** 今このタイミングで入場アニメーションすべき行の id（このティックで追加された） */
   appearingRows: Set<string>;
-  /** ids of rows that should currently fade out (filtered this tick) */
+  /** 今このタイミングでフェードアウトすべき行の id（このティックでフィルタされた） */
   filteringRows: Set<string>;
-  /** ids of rows whose values just changed (UPDATE) and should pulse */
+  /** 値が今変わって（UPDATE）パルスすべき行の id */
   updatingRows: Set<string>;
-  /** table+column keys (see columnKey()) that should currently animate in (ALTER ADD COLUMN this tick) */
+  /** 今このタイミングで入場アニメーションすべき table+column キー（columnKey() 参照。このティックの ALTER ADD COLUMN） */
   appearingColumns: Set<string>;
-  /** table currently highlighted by SELECT, plus its projected columns */
+  /** 現在 SELECT でハイライトされているテーブルと、その射影カラム */
   highlight: CanvasHighlight | null;
-  /** Commits a completed table drag (Issue #34) at final world coordinates. */
+  /** 完了したテーブルのドラッグ（Issue #34）を最終ワールド座標で確定する。 */
   onMoveTable: (name: string, x: number, y: number) => void;
 }
 
@@ -46,21 +46,21 @@ export default function Canvas({
   highlight,
   onMoveTable,
 }: Props) {
-  // Table drag (Issue #34) — declared before `world` below so a live drag
-  // can feed into it (see worldTables). Only the header (class
-  // "sqlviz-drag-handle", excluded from panning below) reports pointerdown,
-  // so this never fights the canvas pan gesture. Live offset lives here in
-  // local state; the underlying DBState (and PgEngine's copy of it) is only
-  // touched once, on pointerup, via onMoveTable.
+  // テーブルのドラッグ（Issue #34）——下の `world` より前に宣言することで、
+  // 進行中のドラッグをそこへ流し込める（worldTables 参照）。pointerdown を
+  // 報告するのはヘッダー（class "sqlviz-drag-handle"。下でパンから excluded）
+  // だけなので、キャンバスのパンジェスチャーと争うことはない。進行中のオフセットは
+  // ここのローカル state に持ち、背後の DBState（および PgEngine 内のその複製）は
+  // pointerup で onMoveTable 経由に一度だけ触れる。
   const [draggingName, setDraggingName] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ dx: 0, dy: 0 });
 
   const tables = state.order.map((n) => state.tables[n]);
-  // Feeds the *live* dragged position into the world-box calculation (not
-  // just the last-committed state), so the canvas grows proactively as a
-  // table approaches an edge instead of only after the drag is dropped.
-  // `tables` itself (passed to <TableNode> below) stays untouched so memo()
-  // still skips re-rendering every table but the one being dragged.
+  // *進行中の* ドラッグ位置を（最後に確定した state だけでなく）ワールドボックス
+  // 計算へ流し込む。そのため、ドラッグを離したあとではなくテーブルが端へ近づく
+  // につれてキャンバスが先回りで育つ。<TableNode> へ渡す `tables` 自体は手つかず
+  // なので、memo() は依然としてドラッグ中の 1 つ以外の全テーブルの再レンダーを
+  // スキップする。
   const worldTables = draggingName
     ? tables.map((t) => (t.name === draggingName ? { ...t, x: t.x + dragOffset.dx, y: t.y + dragOffset.dy } : t))
     : tables;
@@ -68,20 +68,21 @@ export default function Canvas({
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const worldRef = useRef(world);
   worldRef.current = world;
-  // current canvas zoom, kept in sync by publishTransform below — read (not
-  // subscribed to) when converting a drag's screen-px delta into world units,
-  // so table-drag re-renders stay scoped to the dragged TableNode only.
+  // 現在のキャンバスのズーム。下の publishTransform が同期を保つ——ドラッグの
+  // 画面 px 差分をワールド単位へ変換するときに（購読ではなく）読むだけなので、
+  // テーブルドラッグの再レンダーはドラッグ中の TableNode のみにスコープされる。
   const scaleRef = useRef(1);
-  // false until the user pans/zooms by hand — while false, the view auto-fits
-  // as the world box grows (the startup load streams tables in one at a time).
+  // ユーザーが手でパン/ズームするまで false——false の間はワールドボックスが
+  // 育つのに合わせてビューが自動フィットする（起動時ロードはテーブルを 1 つずつ
+  // ストリーミングする）。
   const interactedRef = useRef(false);
-  // guards the pan clamp from cancelling an in-flight fit animation (a delayed
-  // onPanningStop / onWheelStop can land right after the fit starts).
+  // パンのクランプが、実行中のフィットアニメーションをキャンセルしないよう
+  // ガードする（遅延した onPanningStop / onWheelStop がフィット開始直後に届きうる）。
   const fittingRef = useRef(false);
 
-  // Published imperatively (no React state) so panning/zooming never triggers a
-  // re-render of the SVG/table tree — react-zoom-pan-pinch only mutates a CSS
-  // transform on its wrapper. Read by tools/acceptance-check/scenarios/phaseB*.
+  // 命令的に公開する（React state を使わない）ため、パン/ズームが SVG/テーブル木の
+  // 再レンダーを引き起こすことは決してない——react-zoom-pan-pinch はラッパーの
+  // CSS transform を書き換えるだけ。tools/acceptance-check/scenarios/phaseB* が読む。
   const publishTransform = useCallback(
     (s: { scale: number; positionX: number; positionY: number }) => {
       scaleRef.current = s.scale;
@@ -101,23 +102,23 @@ export default function Canvas({
     el.dataset.worldH = String(world.height);
     el.dataset.worldMinX = String(world.minX);
     el.dataset.worldMinY = String(world.minY);
-    // minX/minY don't necessarily change together with width/height (e.g. a
-    // purely-vertical drag near the origin only moves minY/height), so all
-    // four are listed explicitly rather than relying on width/height alone.
+    // minX/minY は width/height と必ずしも一緒に変わるわけではない（例: 原点付近の
+    // 純粋な垂直ドラッグは minY/height しか動かさない）ので、width/height だけに
+    // 頼らず 4 つすべてを明示的に列挙する。
   }, [paneRef, world.width, world.height, world.minX, world.minY]);
 
-  // World-origin drag compensation (Issue #34 follow-up). While a table is
-  // dragged toward the left/top edge it *becomes* the left/top-most table, so
-  // computeWorldBox()'s minX/minY (and thus the SVG viewBox origin) track it
-  // 1:1. react-zoom-pan-pinch's pan transform is frozen during a header drag
-  // (the header is excluded from the pan gesture), so nothing absorbs that
-  // origin shift and the dragged table looks pinned while every *other* table
-  // slides the opposite way. Right/bottom drags don't hit this because minX/minY
-  // don't move there. Fix: whenever the origin shifts mid-drag, shift the pan
-  // transform by the same amount (× scale) with no animation, so a world point
-  // that isn't moving stays put on screen — screen(wx) = positionX + (wx -
-  // minX)·scale, so positionX must gain (minX_new - minX_old)·scale. useLayout-
-  // Effect so it lands in the same frame as the viewBox change (no flicker).
+  // ワールド原点のドラッグ補正（Issue #34 のフォローアップ）。テーブルを左/上の
+  // 端へドラッグしている間、そのテーブルが最左/最上のテーブルに *なる* ので、
+  // computeWorldBox() の minX/minY（つまり SVG の viewBox 原点）がそれに 1:1 で
+  // 追従する。react-zoom-pan-pinch のパン変換はヘッダードラッグ中は凍結されている
+  // （ヘッダーはパンジェスチャーから excluded）ため、その原点シフトを吸収するものが
+  // なく、ドラッグ中のテーブルはピン留めされて見え、他の *すべての* テーブルが
+  // 逆方向へ流れる。右/下のドラッグでは minX/minY が動かないのでこの問題は起きない。
+  // 対策: ドラッグ中に原点がシフトするたびに、パン変換を同じ量（× scale）だけ
+  // アニメーション無しでずらす。そうすれば動いていないワールド点は画面上で
+  // 静止する——screen(wx) = positionX + (wx - minX)·scale なので、positionX に
+  // (minX_new - minX_old)·scale を足せばよい。viewBox 変更と同じフレームで走る
+  // よう useLayoutEffect を使う（ちらつき無し）。
   const prevWorldOriginRef = useRef({ minX: world.minX, minY: world.minY });
   useLayoutEffect(() => {
     const prev = prevWorldOriginRef.current;
@@ -131,11 +132,11 @@ export default function Canvas({
     api.setTransform(positionX + dMinX * scale, positionY + dMinY * scale, scale, 0);
   }, [draggingName, world.minX, world.minY]);
 
-  // Fit = center the world box in the pane, scaled to sit within FIT_PADDING of
-  // every edge. Pure geometry (computeFitTransform) driven by the pane's own
-  // size — no dependency on the live SVG bbox or framer-motion's enter
-  // animation. Stable identity (reads world via a ref) so the effect below only
-  // re-runs on an actual world-size change.
+  // Fit = ワールドボックスをペインの中央に置き、全辺の FIT_PADDING 内に収まる
+  // ようスケールする。ペイン自身のサイズで駆動される純粋な幾何計算
+  // （computeFitTransform）——ライブの SVG bbox や framer-motion の入場アニメーション
+  // に依存しない。安定した同一性（world は ref 経由で読む）なので、下の effect は
+  // 実際のワールドサイズ変化のときだけ再実行される。
   const fitToContent = useCallback(
     (animationMs: number) => {
       const pane = paneRef.current;
@@ -156,11 +157,11 @@ export default function Canvas({
     [paneRef, publishTransform],
   );
 
-  // Auto-fit ONLY while the initial load is still streaming tables in: fit on
-  // mount and on each world-size growth, then disarm for good ~1.2s after the
-  // world stops changing (or immediately on the first manual pan/zoom). After
-  // that the view is only ever re-framed by the explicit "Fit" button — running
-  // more SQL later never yanks the camera. (Review feedback on Issue #17.)
+  // 自動フィットは初期ロードがまだテーブルをストリーミングしている間だけ:
+  // マウント時と、ワールドサイズが育つたびにフィットし、その後ワールドが変化
+  // しなくなって約 1.2 秒で恒久的に解除する（または最初の手動パン/ズームで即座に）。
+  // それ以降は、明示的な「Fit」ボタンでしかビューは再フレームされない——あとで
+  // SQL を実行してもカメラは動かない。（Issue #17 のレビュー反映。）
   useEffect(() => {
     if (interactedRef.current) return;
     const raf = requestAnimationFrame(() => {
@@ -176,10 +177,10 @@ export default function Canvas({
   }, [world.width, world.height, fitToContent]);
 
   const handleFit = useCallback(() => {
-    // one-shot re-frame; does NOT re-arm auto-fit
+    // 一度きりの再フレーム。自動フィットを再アームしない
     interactedRef.current = true;
-    // next frame: let any just-ended pan/zoom gesture finish its own cleanup
-    // (pointerup) before we start the fit animation
+    // 次フレーム: 終わったばかりのパン/ズームジェスチャーが自身のクリーンアップ
+    // （pointerup）を終えてから、フィットアニメーションを開始する
     requestAnimationFrame(() => fitToContent(300));
   }, [fitToContent]);
 
@@ -187,7 +188,7 @@ export default function Canvas({
     interactedRef.current = true;
   }, []);
 
-  // draggingName/dragOffset state itself is declared above, before `world`.
+  // draggingName/dragOffset の state 自体は上、`world` より前で宣言している。
   const dragOriginRef = useRef<{ name: string; startClientX: number; startClientY: number } | null>(null);
 
   const handleHeaderPointerDown = useCallback(
@@ -231,9 +232,10 @@ export default function Canvas({
     };
   }, [draggingName, state, onMoveTable]);
 
-  // limitToBounds is off (its "content must cover the viewport" rule forbids the
-  // letterboxing that fit-all-tables needs), so re-apply our own world-box pan
-  // limit when a gesture ends — overshoot during the drag snaps back into range.
+  // limitToBounds は無効（その「コンテンツはビューポートを覆わねばならない」規則が、
+  // 全テーブルにフィットするのに必要なレターボックス表示を禁じる）なので、
+  // ジェスチャー終了時に独自のワールドボックスのパン制限を再適用する——
+  // ドラッグ中のオーバーシュートは範囲内へスナップバックする。
   const clampToBounds = useCallback(() => {
     if (fittingRef.current) return;
     const pane = paneRef.current;
@@ -257,16 +259,16 @@ export default function Canvas({
         minScale={MIN_SCALE}
         maxScale={MAX_SCALE}
         limitToBounds={false}
-        // discrete, predictable zoom steps — `smooth` multiplies step by the
-        // raw wheel deltaY, which makes a single mouse notch zoom wildly.
+        // 離散的で予測可能なズームステップ——`smooth` はステップを生の wheel deltaY で
+        // 乗算するため、マウスの 1 ノッチで過剰にズームしてしまう。
         smooth={false}
         wheel={{ step: 0.2 }}
         doubleClick={{ disabled: true }}
-        // Issue #34: table headers carry the "sqlviz-drag-handle" class so
-        // react-zoom-pan-pinch's own pan gesture (which listens for
-        // "mousedown" on `window`, independent of React's event tree — see
-        // TableNode.tsx) skips itself when the pointerdown originated there,
-        // instead of fighting a table drag.
+        // Issue #34: テーブルヘッダーは "sqlviz-drag-handle" クラスを持つので、
+        // react-zoom-pan-pinch 自身のパンジェスチャー（React のイベント木とは
+        // 無関係に `window` の "mousedown" を購読する——TableNode.tsx 参照）は、
+        // pointerdown がそこで発生した場合はテーブルドラッグと争わずに自身を
+        // スキップする。
         panning={{ velocityDisabled: true, excluded: ['sqlviz-drag-handle'] }}
         onPanningStart={markInteracted}
         onWheelStart={markInteracted}

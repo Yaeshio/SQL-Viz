@@ -20,10 +20,10 @@ interface Props {
   updatingRows: Set<string>;
   appearingColumns: Set<string>;
   highlight: CanvasHighlight | null;
-  /** Header pointerdown → drag start (Issue #34). Owned by Canvas, which
-   * tracks the drag itself; this only reports the gesture's origin. */
+  /** ヘッダーの pointerdown → ドラッグ開始（Issue #34）。ドラッグ自体を追跡するのは
+   * Canvas 側で、これはジェスチャーの起点を報告するだけ。 */
   onHeaderPointerDown?: (e: ReactPointerEvent, name: string) => void;
-  /** Live world-space offset while this table is the one being dragged. */
+  /** このテーブルがドラッグ中の 1 つであるときの、進行中のワールド座標オフセット。 */
   dragOffset?: { dx: number; dy: number };
   isDragging?: boolean;
 }
@@ -67,7 +67,7 @@ function TableNode({
         data-x={x}
         data-y={y}
       >
-        {/* card */}
+        {/* カード */}
         <rect
           width={TABLE_W}
           height={height}
@@ -76,13 +76,13 @@ function TableNode({
           stroke={isHighlighted ? '#38bdf8' : '#1e293b'}
           strokeWidth={isHighlighted ? 2 : 1}
         />
-        {/* header — sole drag handle (Issue #34). react-zoom-pan-pinch's own
-            pan gesture listens for "mousedown" on `window` directly
-            (independent of this element's pointerdown propagation chain, so
-            no stopPropagation here could ever block it) and skips its own
-            handling when the event target matches its `panning.excluded`
-            class list (Canvas.tsx) — that's what actually keeps this drag
-            from also panning the canvas, not this handler. */}
+        {/* ヘッダー——唯一のドラッグハンドル（Issue #34）。react-zoom-pan-pinch
+            自身のパンジェスチャーは `window` の "mousedown" を直接購読しており
+            （この要素の pointerdown の伝播チェーンとは無関係なので、ここで
+            stopPropagation してもそれを止められない）、イベントターゲットが
+            `panning.excluded` のクラスリスト（Canvas.tsx）に一致する場合は
+            自身の処理をスキップする——このドラッグがキャンバスのパンも
+            起こさないようにしているのは、このハンドラではなくそれ。 */}
         <g
           className="sqlviz-drag-handle"
           data-testid="table-drag-handle"
@@ -105,7 +105,7 @@ function TableNode({
           <circle cx={TABLE_W - 16} cy={HEADER_H / 2} r={4} fill={isHighlighted ? '#38bdf8' : '#475569'} />
         </g>
 
-        {/* column definitions */}
+        {/* カラム定義 */}
         <AnimatePresence>
           {colRows.map(({ col, y: cy }) => {
             const projected = projectedCols ? projectedCols.has(col.name) : false;
@@ -139,10 +139,10 @@ function TableNode({
           })}
         </AnimatePresence>
 
-        {/* separator */}
+        {/* 区切り線 */}
         <line x1={8} y1={height - ROW_H} x2={TABLE_W - 8} y2={height - ROW_H} stroke="#334155" strokeWidth={1} />
 
-        {/* data rows */}
+        {/* データ行 */}
         <AnimatePresence>
           {dataRows.map(({ row, y: ry }) => (
             <TableRow
