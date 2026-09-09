@@ -20,21 +20,22 @@ function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Column identity is only unique within a table, so appearingColumns keys
- * on table+column rather than column name alone. */
+/** カラムの同一性はテーブル内でのみ一意なので、appearingColumns はカラム名
+ * 単独ではなく table+column をキーにする。 */
 export function columnKey(table: string, column: string): string {
   return `${table}::${column}`;
 }
 
-/** Owns the row/column-appear/filter/update/highlight state and plays an
- * AnimationEvent[] timeline against it via setTimeout-paced delays.
+/** 行/カラムの appear・filter・update・highlight の state を所有し、
+ * AnimationEvent[] のタイムラインを setTimeout で刻まれた delay とともにそれに
+ * 対して再生する。
  *
- * table_remove/row_remove/column_drop need no state of their own: by the time
- * playEvents runs, the removed item is already absent from DBState (dispatch
- * happens before playEvents), so framer-motion's AnimatePresence fires the
- * exit transition on unmount automatically. These cases only await a delay
- * so that exit transition has time to finish before subsequent events (or
- * the next statement's dispatch) proceed.
+ * table_remove/row_remove/column_drop は自前の state を必要としない: playEvents が
+ * 走る時点で、削除された項目はすでに DBState から消えており（dispatch は
+ * playEvents より前に起きる）、framer-motion の AnimatePresence がアンマウント時の
+ * 退場トランジションを自動で発火する。これらのケースは、後続のイベント（または
+ * 次の文の dispatch）が進む前に退場トランジションが終わる時間を確保するために
+ * delay を await するだけ。
  */
 export function useAnimationPlayer(): UseAnimationPlayerResult {
   const [appearingRows, setAppearingRows] = useState<Set<string>>(new Set());
@@ -93,7 +94,7 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
           break;
       }
     }
-    // keep highlight; clear transient sets after a beat
+    // highlight は保持する。一時的な set 群は少し置いてからクリアする
     await delay(400);
     setAppearingRows(new Set());
     setFilteringRows(new Set());

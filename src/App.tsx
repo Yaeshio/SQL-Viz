@@ -39,10 +39,10 @@ export default function App() {
     runRef.current = run;
   }, [run]);
 
-  // Startup silent auto-load (Issue #26 Phase 5): in local CLI mode, pull the
-  // DDL the CLI is pointed at and replay it in design mode without touching
-  // the execution log. A missing file (fetchSchema resolves with '') or a
-  // fetch failure both fall back to the ordinary empty-canvas start.
+  // 起動時のサイレント自動ロード（Issue #26 Phase 5）: ローカル CLI モードでは、
+  // CLI が指している DDL を取得し、実行ログに触れずに design モードで再生する。
+  // ファイルが無い場合（fetchSchema が '' で解決）や fetch 失敗は、どちらも
+  // 通常の空キャンバス起動へフォールバックする。
   useEffect(() => {
     if (!localSync.isLocal) return;
     let cancelled = false;
@@ -53,7 +53,7 @@ export default function App() {
           await runRef.current({ sql: content, silent: true });
         }
       } catch {
-        // swallow: startup load failures degrade to the empty-canvas state
+        // 握りつぶす: 起動時ロードの失敗は空キャンバス状態へ縮退する
       }
     })();
     return () => {

@@ -8,7 +8,7 @@ import { PgEngine } from '../pglite/engine';
 import { useAnimationPlayer } from './useAnimationPlayer';
 import type { AnimationHighlight } from './useAnimationPlayer';
 
-// reducer that just holds the current DBState
+// 現在の DBState を保持するだけの reducer
 type Action = { type: 'set'; state: DBState } | { type: 'reset' };
 function reducer(state: DBState, action: Action): DBState {
   switch (action.type) {
@@ -22,12 +22,12 @@ function reducer(state: DBState, action: Action): DBState {
 }
 
 export interface RunOptions {
-  /** SQL to run instead of the current editor contents. Also replaces the
-   * editor's `sql` state, so the editor and canvas never fall out of sync. */
+  /** 現在のエディタ内容の代わりに実行する SQL。エディタの `sql` state も
+   * 置き換えるため、エディタとキャンバスがずれることはない。 */
   sql?: string;
-  /** Suppresses the execution log (no "No statements run yet." reset, no
-   * per-statement log lines) for the startup auto-load — animations still
-   * play normally. Does not suppress errors. */
+  /** 起動時の自動ロード向けに実行ログを抑制する（「No statements run yet.」への
+   * リセットも、文ごとのログ行も出さない）——アニメーションは通常どおり再生される。
+   * エラーは抑制しない。 */
   silent?: boolean;
 }
 
@@ -50,21 +50,22 @@ export interface UseSqlRunnerResult {
   run: (options?: RunOptions) => Promise<void>;
   reset: () => void;
   getDb: () => PGlite | null;
-  /** Commits a drag (Issue #34): marks the table manuallyPositioned at the
-   * given world coordinates via PgEngine.setTablePosition() (so the position
-   * survives the next run()) and updates state immediately, with no
-   * animation/diff involved — repositioning is its own visual feedback. */
+  /** ドラッグを確定する（Issue #34）: PgEngine.setTablePosition() 経由で
+   * テーブルを与えられたワールド座標で manuallyPositioned にマークし（位置が
+   * 次の run() を生き延びるように）、アニメーション/差分を介さず即座に state を
+   * 更新する——位置の変更はそれ自体が視覚的フィードバックになる。 */
   moveTable: (name: string, x: number, y: number) => void;
 }
 
-/** Owns SQL editor input, DBState, execution log/error/playing flags, and
- * drives the parse→execute(PGlite)→layout→diff→animate pipeline via
- * PgEngine.run() + useAnimationPlayer(). PGlite (real PostgreSQL compiled to
- * WASM) is the single source of truth for data/type behavior; DBState is only
- * a snapshot derived from it for layout/diff/animation. `mode` is forwarded
- * to every PgEngine.run() call to enforce the design/experiment allowlist,
- * and an experiment→design transition triggers PgEngine.returnToDesign()
- * (rolling back experiment-mode data changes) via the effect below. */
+/** SQL エディタの入力・DBState・実行ログ/エラー/playing フラグを所有し、
+ * PgEngine.run() + useAnimationPlayer() を通じて
+ * パース→実行(PGlite)→レイアウト→差分→アニメーション のパイプラインを駆動する。
+ * PGlite（WASM にコンパイルされた本物の PostgreSQL）がデータ/型の挙動に関する
+ * 唯一の情報源で、DBState はそこからレイアウト/差分/アニメーション用に導出された
+ * スナップショットにすぎない。`mode` は design/experiment の許可リストを強制する
+ * ため毎回の PgEngine.run() 呼び出しへ転送され、experiment→design の遷移は
+ * 下の effect 経由で PgEngine.returnToDesign()（experiment モードのデータ変更を
+ * ロールバックする）を発火させる。 */
 export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerResult {
   const [sql, setSql] = useState(initialSql);
   const [state, dispatch] = useReducer(reducer, undefined, emptyState);
@@ -83,11 +84,11 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
 
   const pushLog = useCallback((line: string) => setLog((l) => [...l, line]), []);
 
-  // Returning from experiment to design mode discards every data change
-  // (INSERT/UPDATE/DELETE) made in experiment mode: engine.returnToDesign()
-  // rolls back the underlying Postgres transaction, and the resulting diff
-  // is played as a normal animation (existing row_remove/row_update events
-  // already cover "undo an insert" / "undo an update" visually).
+  // experiment モードから design モードへ戻ると、experiment モードで行った
+  // データ変更（INSERT/UPDATE/DELETE）をすべて破棄する: engine.returnToDesign()
+  // が背後の Postgres トランザクションをロールバックし、その結果の差分は通常の
+  // アニメーションとして再生される（既存の row_remove/row_update イベントが
+  // 「挿入を取り消す」/「更新を取り消す」を視覚的にすでにカバーしている）。
   useEffect(() => {
     const prevMode = prevModeRef.current;
     prevModeRef.current = mode;
