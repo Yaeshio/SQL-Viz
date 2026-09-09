@@ -1,39 +1,38 @@
 import type { AnimationEvent, DBState } from './types';
 
 /**
- * Compare old and new DBState and produce an ordered list of animation events.
- * Order: table appearances, then table removals, then per table (in next.order)
- * column additions/removals, row additions/removals, row value updates, filter
- * changes, then select highlight.
+ * 変更前後の DBState を比較し、順序付きのアニメーションイベント列を生成する。
+ * 順序: テーブルの出現 → テーブルの削除 → テーブルごと（next.order 順）の
+ * カラム追加/削除・行追加/削除・行の値更新・フィルタ変化 → SELECT ハイライト。
  */
 export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
   const events: AnimationEvent[] = [];
 
-  // 1. Tables that appeared
+  // 1. 出現したテーブル
   for (const name of next.order) {
     if (!old.tables[name]) {
       events.push({ kind: 'table_appear', table: name });
     }
   }
 
-  // 2. Tables that were removed (not visitable via next.order, so scan old.order)
+  // 2. 削除されたテーブル（next.order からは辿れないので old.order を走査する）
   for (const name of old.order) {
     if (!next.tables[name]) {
       events.push({ kind: 'table_remove', table: name });
     }
   }
 
-  // 3. Column changes + row additions/removals/updates + filter changes per table
+  // 3. テーブルごとのカラム変化 + 行の追加/削除/更新 + フィルタ変化
   for (const name of next.order) {
     const nt = next.tables[name];
     const ot = old.tables[name];
     if (!ot) {
-      // brand new table: all its rows are "added"
+      // まったく新しいテーブル: その全行が「追加」扱い
       nt.rows.forEach((r, i) => events.push({ kind: 'row_add', table: name, rowId: r.id, index: i }));
       continue;
     }
 
-    // column additions/removals (compared by name)
+    // カラムの追加/削除（名前で比較）
     const oldColNames = new Set(ot.columns.map((c) => c.name));
     const newColNames = new Set(nt.columns.map((c) => c.name));
     nt.columns.forEach((c) => {
@@ -43,23 +42,23 @@ export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
       if (!newColNames.has(c.name)) events.push({ kind: 'column_drop', table: name, column: c.name });
     });
 
-    // additions: rows present in next but not in old (matched by id)
+    // 追加: next には在るが old には無い行（id で照合）
     const oldIds = new Set(ot.rows.map((r) => r.id));
     const newIds = new Set(nt.rows.map((r) => r.id));
     nt.rows.forEach((r, i) => {
       if (!oldIds.has(r.id)) events.push({ kind: 'row_add', table: name, rowId: r.id, index: i });
     });
 
-    // removals: rows present in old but not in next (matched by id)
+    // 削除: old には在るが next には無い行（id で照合）
     ot.rows.forEach((r) => {
       if (!newIds.has(r.id)) events.push({ kind: 'row_remove', table: name, rowId: r.id });
     });
 
     const oldById = new Map(ot.rows.map((r) => [r.id, r]));
 
-    // value updates: compare only keys present in both old and new values, so
-    // an ALTER TABLE's own NULL-fill (ADD COLUMN) or key removal (DROP COLUMN)
-    // on existing rows isn't itself misreported as a row_update.
+    // 値の更新: old と new の両方の values に存在するキーだけを比較する。
+    // そのため、既存行に対する ALTER TABLE 自身の NULL 埋め（ADD COLUMN）や
+    // キー削除（DROP COLUMN）が row_update として誤報告されない。
     nt.rows.forEach((r) => {
       const o = oldById.get(r.id);
       if (!o) return;
@@ -68,7 +67,7 @@ export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
       if (changed) events.push({ kind: 'row_update', table: name, rowId: r.id });
     });
 
-    // filter changes
+    // フィルタの変化
     nt.rows.forEach((r) => {
       const o = oldById.get(r.id);
       if (!o) return;
@@ -77,7 +76,7 @@ export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
     });
   }
 
-  // 4. Select highlight
+  // 4. SELECT ハイライト
   if (next.lastSelect) {
     events.push({
       kind: 'select_highlight',

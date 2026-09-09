@@ -1,8 +1,8 @@
 /**
- * Splits a (possibly multi-statement) SQL string into individual raw statement
- * texts on top-level semicolons, skipping over semicolons that appear inside
- * quoted strings/identifiers or comments. Empty segments (blank input, trailing
- * semicolons, comment-only segments) are dropped from the result.
+ * （複数文かもしれない）SQL 文字列を、トップレベルのセミコロンで個々の生の文
+ * テキストへ分割する。クォートされた文字列/識別子やコメントの中に現れる
+ * セミコロンはスキップする。空のセグメント（空入力、末尾のセミコロン、
+ * コメントのみのセグメント）は結果から除外される。
  */
 export function splitStatements(sql: string): string[] {
   const statements: string[] = [];

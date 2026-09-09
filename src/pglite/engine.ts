@@ -31,9 +31,9 @@ interface DesignCheckpoint {
   rowSeq: number;
 }
 
-/** Fixed savepoint name wrapped around every statement while the experiment
- * transaction is open, so one failed statement rolls back to just before
- * itself instead of aborting the whole transaction (Issue #36). */
+/** experiment トランザクションが開いている間、各文を囲む固定の SAVEPOINT 名。
+ * これにより失敗した 1 文はトランザクション全体を中断するのではなく、その文の
+ * 直前まで戻る（Issue #36）。 */
 const STMT_SAVEPOINT = 'sqlviz_stmt';
 
 export function quoteIdent(name: string): string {
@@ -78,12 +78,12 @@ function buildLabel(stmt: Parsed): string {
 }
 
 /**
- * Stateful execution engine backed by a real PGlite (WASM PostgreSQL) instance.
- * Every accepted statement is actually executed against Postgres, so type errors,
- * constraint violations, and WHERE-clause evaluation all reflect genuine
- * PostgreSQL behavior instead of a hand-rolled JS reimplementation. The instance
- * itself is the accumulated database state; DBState snapshots are derived from
- * it after each statement purely to drive layout/diff/animation.
+ * 実際の PGlite（WASM PostgreSQL）インスタンスを背後に持つ、状態を保持する実行
+ * エンジン。受理された文はすべて実際に Postgres に対して実行されるため、型エラー・
+ * 制約違反・WHERE 句の評価はすべて、手書きの JS 再実装ではなく本物の PostgreSQL の
+ * 挙動を反映する。インスタンス自体が蓄積されたデータベース状態であり、DBState の
+ * スナップショットは各文のあとに、レイアウト/差分/アニメーションを駆動する目的
+ * だけのためにそこから導出される。
  */
 export class PgEngine {
   private db: PGlite | null = null;
@@ -98,30 +98,29 @@ export class PgEngine {
     return this.db !== null;
   }
 
-  /** Exposes the underlying PGlite instance for read-only introspection
-   * (e.g. ddlExport.ts querying information_schema). db itself stays
-   * private; this is the only sanctioned way to reach it from outside. */
+  /** 読み取り専用のイントロスペクション（例: ddlExport.ts が information_schema を
+   * クエリする）のために、背後の PGlite インスタンスを公開する。db 自体は
+   * private のままで、外部からそこへ到達する唯一の正規手段がこれ。 */
   getDb(): PGlite | null {
     return this.db;
   }
 
-  /** Last computed DBState, exposed read-only for GET /api/query/state
-   * (Issue #27) — reads only, executes nothing. */
+  /** 最後に計算された DBState。GET /api/query/state（Issue #27）向けに読み取り
+   * 専用で公開する——読むだけで、何も実行しない。 */
   getState(): DBState {
     return this.lastState;
   }
 
   /**
-   * Records a user drag (Issue #34): marks a table manuallyPositioned at the
-   * given world coordinates and writes the result into `this.lastState`, the
-   * same internal snapshot `run()` clones from as `current` on the next
-   * call. Without this, a drag would only ever reach the browser's own
-   * DBState copy and get silently discarded by layoutTables() on the very
-   * next statement. Also mirrors the change into `designCheckpoint.lastState`
-   * when one is open, so a later experiment→design returnToDesign() ROLLBACK
-   * (which only undoes data changes) doesn't also revert the drag back to
-   * wherever the table was when experiment mode began. No-ops if the table
-   * doesn't exist (e.g. dropped mid-drag).
+   * ユーザーのドラッグを記録する（Issue #34）: テーブルを与えられたワールド座標で
+   * manuallyPositioned にマークし、その結果を `this.lastState`——次回の `run()` が
+   * `current` として clone する内部スナップショット——へ書き込む。これがないと、
+   * ドラッグはブラウザ自身の DBState コピーにしか届かず、次の文で layoutTables() に
+   * 黙って捨てられてしまう。designCheckpoint が開いているときはその
+   * `designCheckpoint.lastState` にも変更を反映する。そうすることで、後の
+   * experiment→design の returnToDesign() ROLLBACK（データ変更のみを取り消す）が、
+   * ドラッグを experiment モード開始時の位置へ戻してしまわないようにする。
+   * テーブルが存在しない場合（例: ドラッグ中に drop された）は何もしない。
    */
   setTablePosition(name: string, x: number, y: number): DBState {
     if (!this.lastState.tables[name]) return this.lastState;
@@ -176,12 +175,12 @@ export class PgEngine {
   }
 
   /**
-   * Undoes every data change (INSERT/UPDATE/DELETE) made since experiment
-   * mode was entered, via a plain Postgres ROLLBACK of the transaction opened
-   * on first experiment-mode statement. Structural statements are never
-   * allowed in experiment mode (mode gate in run()), so a ROLLBACK can never
-   * discard schema changes here. No-ops if experiment mode was never entered
-   * (or already returned from) since the last reset/init.
+   * experiment モードに入って以降に行われたデータ変更（INSERT/UPDATE/DELETE）を
+   * すべて取り消す。最初の experiment モードの文で開いたトランザクションを、素の
+   * Postgres の ROLLBACK で巻き戻すことによる。構造を変える文は experiment モードでは
+   * 決して許可されない（run() のモードゲート）ので、ここでの ROLLBACK がスキーマ
+   * 変更を捨てることはあり得ない。前回の reset/init 以降 experiment モードに一度も
+   * 入っていない（またはすでに復帰済み）の場合は何もしない。
    */
   async returnToDesign(): Promise<DBState | null> {
     if (!this.inExperimentTx || !this.designCheckpoint) return null;
@@ -197,12 +196,12 @@ export class PgEngine {
   }
 
   /**
-   * Resolves which stable row ids a WHERE clause matches, via the same
-   * ctid-lookup pattern used by SELECT. For UPDATE/DELETE this MUST be called
-   * before the raw statement executes: Postgres assigns an updated row a new
-   * physical ctid, so matching afterward would misidentify updated rows as
-   * newly-inserted ones instead of preserving their stable id. Returns null
-   * to mean "no WHERE clause, all rows match" (mirrors SELECT's matchedIds).
+   * WHERE 句が一致する安定行 id の集合を、SELECT が使うのと同じ ctid ルックアップの
+   * パターンで解決する。UPDATE/DELETE ではこれを生の文の実行前に呼ばなければ
+   * ならない: Postgres は更新された行に新しい物理 ctid を割り当てるため、あとで
+   * 照合すると、更新された行の安定 id を保つのではなく新規挿入された行として
+   * 誤認識してしまう。null は「WHERE 句なし、全行が一致」を意味する
+   * （SELECT の matchedIds と同じ）。
    */
   private async resolveMatchedIds(db: PGlite, table: string, where: WhereClause | null): Promise<Set<string> | null> {
     if (!where) return null;
@@ -221,9 +220,8 @@ export class PgEngine {
     const rawStatements = splitStatements(sql);
     if (rawStatements.length === 0) return { results: [] };
 
-    // Pre-flight gate: classify + validate every statement against the
-    // supported-subset allowlist before executing any of them, mirroring the
-    // previous all-or-nothing parseError behavior.
+    // 事前ゲート: どの文も実行する前に、全文を対応サブセットの許可リストに対して
+    // 分類・検証する。従来の all-or-nothing な parseError の挙動と同じ。
     const parsed: { raw: string; stmt: Parsed }[] = [];
     for (const raw of rawStatements) {
       const { statements, error } = parseSql(raw);
@@ -231,9 +229,9 @@ export class PgEngine {
       parsed.push({ raw, stmt: statements[0] });
     }
 
-    // Mode gate: a second, independent allowlist on top of the syntax gate
-    // above (mode-and-sql-scope-spec.md 2節). All-or-nothing, same shape as a parse
-    // error: one disallowed statement type rejects the whole batch untouched.
+    // モードゲート: 上記の構文ゲートの上に載る、独立した 2 つ目の許可リスト
+    // （mode-and-sql-scope-spec.md 2節）。all-or-nothing で、パースエラーと同じ形:
+    // 1 文でも不許可の文種があればバッチ全体を手つかずで拒否する。
     const allowedTypes = MODE_ALLOWED_TYPES[mode];
     const disallowed = parsed.find(({ stmt }) => !allowedTypes.has(stmt.type));
     if (disallowed) {
@@ -243,11 +241,11 @@ export class PgEngine {
       };
     }
 
-    // Lazily open the experiment transaction on the first experiment-mode
-    // statement actually executed, not on the mode toggle itself, so flipping
-    // modes without running anything stays a no-op. Everything done in
-    // experiment mode (across any number of Run clicks) accumulates in this
-    // one uncommitted transaction until returnToDesign() rolls it back.
+    // experiment トランザクションは、モードトグル自体ではなく、実際に実行される
+    // 最初の experiment モードの文で遅延的に開く。そのため、何も実行せずにモードを
+    // 切り替えるだけなら何も起きない。experiment モードで行われるすべて（Run を
+    // 何回押しても）は、returnToDesign() が巻き戻すまでこの 1 つの未コミット
+    // トランザクションに蓄積される。
     if (mode === 'experiment' && !this.inExperimentTx) {
       this.designCheckpoint = {
         ctidMaps: this.cloneCtidMaps(),
@@ -261,13 +259,13 @@ export class PgEngine {
     const results: StatementResult[] = [];
     let current = this.lastState;
 
-    // While the experiment transaction is open, wrap each statement in a
-    // SAVEPOINT so a failed statement only rolls back to just before itself.
-    // Without this, one Postgres error aborts the whole transaction, and
-    // since that transaction stays open across run() calls, every later
-    // request fails — in either mode — until POST /api/query/reset (Issue
-    // #36). Guarded on inExperimentTx because SAVEPOINT is only valid inside
-    // a transaction block; design-mode autocommit statements need none.
+    // experiment トランザクションが開いている間は、各文を SAVEPOINT で囲み、
+    // 失敗した文がその文の直前までしか巻き戻らないようにする。これがないと、
+    // 1 つの Postgres エラーがトランザクション全体を中断し、そのトランザクションは
+    // run() 呼び出しをまたいで開いたままなので、POST /api/query/reset まで以降の
+    // すべてのリクエストが——どちらのモードでも——失敗する（Issue #36）。SAVEPOINT は
+    // トランザクションブロック内でのみ有効なため inExperimentTx でガードする。
+    // design モードの自動コミット文には不要。
     const useSavepoint = this.inExperimentTx;
 
     for (const { raw, stmt } of parsed) {
@@ -277,9 +275,9 @@ export class PgEngine {
 
       let next: DBState;
       try {
-        // For UPDATE/DELETE, resolve matched ids before the raw statement
-        // runs (Postgres reassigns ctids on update) — inside the savepoint so
-        // a failure here rolls back cleanly too.
+        // UPDATE/DELETE では、生の文が走る前に一致 id を解決する（Postgres は
+        // 更新時に ctid を振り直す）——ここでの失敗もきれいに巻き戻るよう
+        // SAVEPOINT の内側で行う。
         let matchedIds: Set<string> | null = null;
         if (stmt.type === 'update' || stmt.type === 'delete') {
           matchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
@@ -288,8 +286,8 @@ export class PgEngine {
         next = await this.snapshotAfter(stmt, current, matchedIds);
       } catch (e) {
         if (useSavepoint) {
-          // ROLLBACK TO doesn't release the savepoint; RELEASE afterward
-          // keeps the savepoint stack from growing across statements.
+          // ROLLBACK TO は SAVEPOINT を解放しない。あとで RELEASE することで
+          // SAVEPOINT スタックが文をまたいで増え続けないようにする。
           await db.query(`ROLLBACK TO SAVEPOINT ${STMT_SAVEPOINT}`);
           await db.query(`RELEASE SAVEPOINT ${STMT_SAVEPOINT}`);
         }
@@ -419,7 +417,7 @@ export class PgEngine {
       return next;
     }
 
-    // select: no data mutation, only recompute filteredOut against existing rows
+    // select: データは変更せず、既存行に対して filteredOut を再計算するだけ
     const table = current.tables[stmt.table];
     const next = cloneState(current);
     const filterMatchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
