@@ -3,9 +3,9 @@ import type { SyncStatus } from '../../hooks/useLocalSync';
 
 export interface LocalSyncControlsProps {
   isLocal: boolean;
-  /** true when sql-studio was launched with --mode=verify: Save no longer
-   * overwrites the target file, it exports to a separate server-chosen path
-   * (see App.tsx's handleSave / localSync.verifySave). */
+  /** sql-studio が --mode=verify で起動されたとき true: Save は対象ファイルを
+   * もう上書きせず、サーバーが選んだ別のパスへエクスポートする
+   * （App.tsx の handleSave / localSync.verifySave 参照）。 */
   verifyMode: boolean;
   saveStatus: SyncStatus;
   reloadStatus: SyncStatus;
@@ -14,8 +14,8 @@ export interface LocalSyncControlsProps {
   onReload: () => void;
 }
 
-/** Replaces the GitHub settings gear (Issue #26): renders nothing outside
- * local CLI mode, so the hosted/Vercel build never shows any of this. */
+/** GitHub 設定の歯車を置き換えるもの（Issue #26）: ローカル CLI モード以外では
+ * 何も描画しないため、ホスティング/Vercel ビルドではこれが一切表示されない。 */
 export default function LocalSyncControls({
   isLocal,
   verifyMode,

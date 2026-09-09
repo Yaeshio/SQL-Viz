@@ -13,11 +13,11 @@ export interface UseLocalSyncResult {
   saveStatus: SyncStatus;
   reloadStatus: SyncStatus;
   save: (ddl: string) => Promise<void>;
-  /** verify-mode counterpart to save(): exports to a server-chosen path
-   * instead of overwriting the target file. */
+  /** save() の verify モード版: 対象ファイルを上書きする代わりに、サーバーが
+   * 選んだパスへエクスポートする。 */
   verifySave: (ddl: string) => Promise<void>;
-  /** Returns the fetched DDL on success (caller feeds it to run()), or null
-   * on failure — reloadStatus carries the error for display. */
+  /** 成功時は取得した DDL を返す（呼び出し側が run() に渡す）。失敗時は null——
+   * エラーは表示用に reloadStatus が保持する。 */
   reload: () => Promise<string | null>;
 }
 
@@ -25,10 +25,10 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : 'Unknown error';
 }
 
-/** Thin state wrapper around src/local/localSync.ts's fetchSchema/saveSchema.
- * isLocal is read once per render from isLocalMode() (a build-time env flag,
- * not something that changes at runtime) so LocalSyncControls can hide
- * itself entirely outside CLI mode. */
+/** src/local/localSync.ts の fetchSchema/saveSchema を薄く包む state ラッパー。
+ * isLocal はレンダーごとに isLocalMode()（実行時に変わるものではなく、ビルド時の
+ * 環境フラグ）から一度読む。そのため LocalSyncControls は CLI モード外では自身を
+ * 完全に隠せる。 */
 export function useLocalSync(): UseLocalSyncResult {
   const [saveStatus, setSaveStatus] = useState<SyncStatus>({ kind: 'idle' });
   const [reloadStatus, setReloadStatus] = useState<SyncStatus>({ kind: 'idle' });
