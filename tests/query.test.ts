@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { main, parseArgs, readStdin, runQuery } from '../scripts/query.mjs';
+import { fetchHistory, main, parseArgs, readStdin, resolveReplay, runQuery } from '../scripts/query.mjs';
 
 function jsonResponse(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, statusText: '', json: async () => body } as Response;
@@ -35,6 +35,8 @@ describe('parseArgs', () => {
       sqlArg: 'SELECT * FROM users',
       mode: 'design',
       url: 'http://127.0.0.1:5173',
+      replaySeq: null,
+      showHistory: false,
     });
   });
 
@@ -43,11 +45,21 @@ describe('parseArgs', () => {
       sqlArg: 'SELECT 1',
       mode: 'experiment',
       url: 'http://127.0.0.1:5199',
+      replaySeq: null,
+      showHistory: false,
     });
   });
 
   it('QUERY-CLI-03: positional引数なし → sqlArg は null', () => {
     expect(parseArgs(['--mode=experiment']).sqlArg).toBeNull();
+  });
+
+  it('QUERY-CLI-15: --replay=<seq> を数値として解析する', () => {
+    expect(parseArgs(['--replay=3']).replaySeq).toBe(3);
+  });
+
+  it('QUERY-CLI-16: --history を解析する', () => {
+    expect(parseArgs(['--history']).showHistory).toBe(true);
   });
 });
 
@@ -100,6 +112,39 @@ describe('runQuery', () => {
     const result = await runQuery({ sql: 'SELECT 1', mode: 'design', url: 'http://127.0.0.1:5173', fetchImpl });
     expect(result.exitCode).toBe(3);
     expect(result.stderr).toContain('sql must be a string');
+  });
+});
+
+describe('fetchHistory', () => {
+  it('QUERY-CLI-17: 成功 → exitCode 0、stdoutに履歴JSON', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(200, { history: [{ seq: 1, sql: 'SELECT 1' }] }));
+    const result = await fetchHistory({ url: 'http://127.0.0.1:5173', fetchImpl });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout!.trim())).toEqual({ history: [{ seq: 1, sql: 'SELECT 1' }] });
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:5173/api/query/history');
+  });
+
+  it('QUERY-CLI-18: fetch自体が例外 → exitCode 2', async () => {
+    const fetchImpl = vi.fn().mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const result = await fetchHistory({ url: 'http://127.0.0.1:1', fetchImpl });
+    expect(result.exitCode).toBe(2);
+  });
+});
+
+describe('resolveReplay', () => {
+  it('QUERY-CLI-19: 該当するseqが見つかれば sql/mode を返す', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, { history: [{ seq: 1, sql: 'CREATE TABLE t (id INT)', mode: 'design' }, { seq: 2, sql: 'SELECT 1', mode: 'experiment' }] }),
+    );
+    const result = await resolveReplay({ replaySeq: 2, url: 'http://127.0.0.1:5173', fetchImpl });
+    expect(result).toEqual({ sql: 'SELECT 1', mode: 'experiment' });
+  });
+
+  it('QUERY-CLI-20: 該当するseqが無ければ exitCode 3', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(200, { history: [] }));
+    const result = await resolveReplay({ replaySeq: 99, url: 'http://127.0.0.1:5173', fetchImpl });
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain('No history entry with seq=99');
   });
 });
 
@@ -161,6 +206,87 @@ describe('main', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(3);
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('No SQL provided'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('QUERY-CLI-21: --history → GET /api/query/history を叩いて結果を出力する', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { history: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await main(['--history']);
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:5173/api/query/history');
+    expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('"history"'));
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('QUERY-CLI-22: --replay=<seq> → 履歴のsql/modeで /api/query を叩く（--modeは無視）', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { history: [{ seq: 5, sql: 'SELECT 1', mode: 'experiment' }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await main(['--replay=5', '--mode=design']);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:5173/api/query', expect.objectContaining({
+      body: JSON.stringify({ sql: 'SELECT 1', mode: 'experiment' }),
+    }));
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('QUERY-CLI-23: --replay=<存在しないseq> → ネットワーク越しに探しに行きexit(3)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { history: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await main(['--replay=99']);
+
+    expect(exitSpy).toHaveBeenCalledWith(3);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('No history entry with seq=99'));
+  });
+
+  it('QUERY-CLI-24: 不正な --replay（非正整数） → ネットワークアクセスせずexit(3)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await main(['--replay=0']);
+
+    expect(exitSpy).toHaveBeenCalledWith(3);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid --replay'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('QUERY-CLI-25: --history と位置引数SQLの同時指定 → 相互排他エラーでexit(3)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await main(['SELECT 1', '--history']);
+
+    expect(exitSpy).toHaveBeenCalledWith(3);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('QUERY-CLI-26: --replay と位置引数SQLの同時指定 → 相互排他エラーでexit(3)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await main(['SELECT 1', '--replay=1']);
+
+    expect(exitSpy).toHaveBeenCalledWith(3);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

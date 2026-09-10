@@ -359,6 +359,16 @@ Issue #27 で、`npm run sql-studio` のサーバープロセスに常駐する 
 リアルタイム同期しない、完全に独立した`PgEngine`インスタンス。詳細仕様は
 [docs/agent-query-api-spec.md](docs/agent-query-api-spec.md) を参照。
 
+Issue #37 で、`POST /api/query` の実行履歴（成功/失敗問わず、`{seq, sql,
+mode, at, ok, parseError?, statements[]}` の要約。`DBState` は持たない、
+上限200件でFIFO破棄）を `queryApiPlugin.ts` のクロージャローカル state
+（`PgEngine` 自体には持たせない——起動時ブートストラップDDLの実行を履歴に
+混入させないため）として保持し、`GET /api/query/history` で公開した。CLI に
+`--history`（一覧をJSON出力）と `--replay=<seq>`（履歴の `sql`/`mode` を
+そのまま再送。`--history`・`--replay`・位置引数SQLは相互排他）を追加。
+履歴は監査ログとして扱い `POST /api/query/reset` ではクリアしない（消えるのは
+プロセス終了時のみ）。
+
 Issue #33 で、Issue #27のクエリAPI/CLIとIssue #32の`verify`起動モードを
 組み合わせ、エージェントが改修提案ドキュメント（変更前後のスキーマ抜粋・
 検証に使ったクエリ例）を書き出すワークフローを整備した。新規APIエンド

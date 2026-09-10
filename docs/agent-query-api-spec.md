@@ -29,6 +29,14 @@
 キャンバス上の未保存の変更は、このAPI経由のセッション状態に一切反映
 されない。
 
+サーバープロセスは、`POST /api/query`で受け付けた各リクエスト（成功・失敗を
+問わず）の実行履歴も保持する（Issue #37、`GET /api/query/history`）。履歴は
+DB状態とは独立した「このプロセスで何を実行したか」の監査ログであり、
+**`POST /api/query/reset`を実行してもクリアされない**——`reset`は破壊的なDB
+リセットだが、人間がミスして`reset`した直後こそ、その原因になった操作より前の
+「良かったクエリ」を`--replay`したい場面がある、という判断による。履歴が
+消えるのはサーバープロセスの終了時のみ。
+
 **起動時ブートストラップ**: サーバー起動時（および`POST /api/query/reset`
 実行時）、`npm run sql-studio -- <path>`起動時に渡されたDDLファイルの内容を
 `design`モードで実行し、その状態からセッションを開始する（`GET /api/schema`
@@ -105,8 +113,36 @@ DDLの実行）が完了しているかどうか。`error`は、ブートスト�
 即座にリセットする（単なる空DB化ではなく、DDLファイルを再読み込みして
 再実行する——ファイルが起動後に書き換えられていれば、その最新内容から
 やり直す）。**確認なしに即座に反映される破壊的操作**であり、実行中の
-セッション状態はすべて失われる。`{ ok: boolean, error: string | null }`を
-返す（`ok`は再ブートストラップが成功したか）。
+セッション状態は（下記の実行履歴を除き）すべて失われる。
+`{ ok: boolean, error: string | null }`を返す（`ok`は再ブートストラップが
+成功したか）。
+
+### `GET /api/query/history`
+
+SQLを実行せず、`POST /api/query`で受け付けた各リクエストの実行履歴を
+`{ history: HistoryEntry[] }`として返す（Issue #37）。古いものが先頭、
+最新が末尾。
+
+```ts
+interface HistoryEntry {
+  seq: number;       // 実行順に1から単調増加。evictされても再利用しない
+  sql: string;       // 受け付けた生のSQL文字列（そのまま再送すればreplayになる）
+  mode: 'design' | 'experiment';
+  at: string;        // ISO 8601 タイムスタンプ
+  ok: boolean;       // parseErrorなし かつ 全文のerrorなし
+  parseError?: string;
+  statements: { label: string; error?: string }[];
+}
+```
+
+- `DBState`のスナップショットは持たない（`GET /api/query/state`が現在の状態を
+  返すため冗長。履歴一覧のペイロードを小さく保つ）。
+- 保持件数の上限は200件。超えると最も古いエントリから破棄される。`seq`は
+  破棄されても再利用されないため、`--replay`で指定した`seq`が見つからない
+  場合は「古すぎて破棄された」と判別できる。
+- 起動時ブートストラップDDLの実行は履歴に含まれない（`POST /api/query`
+  経由の実行のみが対象）。
+- `POST /api/query/reset`では**クリアされない**（2節）。
 
 ## 4. 結果の解釈方法（文種別）
 
@@ -187,14 +223,26 @@ npmを介さず`node scripts/query.mjs "<SQL>"`を直接呼び出すこと。後
 `--mode=design|experiment`（省略時`design`）、`--url=http://127.0.0.1:PORT`
 （省略時`http://127.0.0.1:5173`）を指定できる。
 
+### 履歴の閲覧・再実行（Issue #37）
+
+- `--history` — `GET /api/query/history`を叩き、`{ history: HistoryEntry[] }`
+  と等価なJSONのみを標準出力へ出す（他の出力と同じく1行のコンパクトJSON。
+  整形したい場合は`jq`にパイプする）。
+- `--replay=<seq>` — 履歴から`seq`が一致するエントリを探し、その**記録済みの
+  `sql`と`mode`をそのまま**`POST /api/query`へ再送する。`--replay`と同時に
+  `--mode=`を指定しても、再現性を優先して履歴のモードが使われる（`--mode=`は
+  無視される）。
+- `--history`・`--replay=<seq>`・位置引数のSQLは**相互排他**（同時指定は
+  終了コード3）。
+
 終了コード:
 
 | コード | 意味 |
 |---|---|
-| `0` | 成功（`parseError`なし、全文の`error`なし） |
+| `0` | 成功（`parseError`なし、全文の`error`なし。`--history`は取得成功） |
 | `1` | SQL実行エラー（`parseError`または`StatementResult.error`が存在） |
 | `2` | サーバー未起動/接続エラー（`fetch`自体が失敗） |
-| `3` | リクエスト不正（SQL未指定、`--mode`不正、サーバーが非2xx応答） |
+| `3` | リクエスト不正（SQL未指定、`--mode`不正、`--replay`が非正整数、`--replay`の`seq`が履歴に無い、引数の相互排他違反、サーバーが非2xx応答） |
 
 ## 6. セキュリティ考慮事項
 
@@ -222,10 +270,16 @@ npmを介さず`node scripts/query.mjs "<SQL>"`を直接呼び出すこと。後
   [Issue #47](https://github.com/Yaeshio/SQL-Viz/issues/47)）。
 - JOIN・GROUP BY/集約等、複数テーブル結合・集約結果の可視化を伴う構文への
   拡張（Largeティア、[Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)）。
+- 実行履歴のディスクへの永続化（プロセス終了で消える点は、セッション状態が
+  メモリ上のみという既存のセッションモデルと同じ。GitHub連携での履歴保持は
+  旧Issue #18のスコープであり本仕様では扱わない）。
+- ブラウザUI側での実行履歴の表示（Issue #37はCLI/APIスコープ）。
 
 ## 8. 参照
 
 - [Issue #27](https://github.com/Yaeshio/SQL-Viz/issues/27)
+- [Issue #37](https://github.com/Yaeshio/SQL-Viz/issues/37) — 実行履歴・
+  再実行(replay)機能（`GET /api/query/history`、CLI `--history`/`--replay`）
 - [local-cli-sync-spec.md](./local-cli-sync-spec.md) — ローカルサーバー基盤・
   DDLファイルブートストラップの共有ロジック
 - [mode-and-sql-scope-spec.md](./mode-and-sql-scope-spec.md) — design/
