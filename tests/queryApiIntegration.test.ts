@@ -171,4 +171,62 @@ describe('agent query API — real server + real CLI subprocess', () => {
     },
     15000,
   );
+
+  it(
+    'QUERY-INT-05: CLI — --history で一覧取得後、--replay=<seq> で再実行できる (Issue #37)',
+    async () => {
+      tmpDir = await mkdtemp(path.join(tmpdir(), 'sql-viz-query-api-'));
+      const schemaPath = path.join(tmpDir, 'schema.sql');
+
+      server = await spawnVite({ filePath: schemaPath, port: undefined });
+      const url = server.resolvedUrls!.local[0];
+      await waitForHealthy(url);
+      const urlArg = `--url=${url.replace(/\/$/, '')}`;
+
+      const create = await runCli(['CREATE TABLE users (id INT)', urlArg]);
+      expect(create.code).toBe(0);
+
+      const historyRes = await runCli(['--history', urlArg]);
+      expect(historyRes.code).toBe(0);
+      const { history } = JSON.parse(historyRes.stdout);
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({ seq: 1, sql: 'CREATE TABLE users (id INT)', mode: 'design', ok: true });
+
+      // 同一SQLをdesignモードで再実行するとテーブルが既に存在し失敗する——これは
+      // replayが実際に元のsql/modeを再送していることの検証を兼ねる。
+      const replay = await runCli(['--replay=1', urlArg]);
+      expect(replay.code).toBe(1);
+      const replayBody = JSON.parse(replay.stdout);
+      expect(replayBody.results[0].error).toContain('already exists');
+
+      // replay自体も新しい履歴エントリとして記録される。
+      const historyAfter = await runCli(['--history', urlArg]);
+      expect(JSON.parse(historyAfter.stdout).history).toHaveLength(2);
+    },
+    60000,
+  );
+
+  it(
+    'QUERY-INT-06: POST /api/query/reset を挟んでも --history の内容は消えない (Issue #37)',
+    async () => {
+      tmpDir = await mkdtemp(path.join(tmpdir(), 'sql-viz-query-api-'));
+      const schemaPath = path.join(tmpDir, 'schema.sql');
+
+      server = await spawnVite({ filePath: schemaPath, port: undefined });
+      const url = server.resolvedUrls!.local[0];
+      await waitForHealthy(url);
+      const urlArg = `--url=${url.replace(/\/$/, '')}`;
+
+      await runCli(['CREATE TABLE users (id INT)', urlArg]);
+
+      const resetRes = await fetch(`${url}api/query/reset`, { method: 'POST' });
+      expect(await resetRes.json()).toEqual({ ok: true, error: null });
+
+      const historyRes = await runCli(['--history', urlArg]);
+      const { history } = JSON.parse(historyRes.stdout);
+      expect(history).toHaveLength(1);
+      expect(history[0].sql).toBe('CREATE TABLE users (id INT)');
+    },
+    60000,
+  );
 });

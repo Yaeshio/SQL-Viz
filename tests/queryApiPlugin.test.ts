@@ -4,7 +4,7 @@ import type { Connect } from 'vite';
 const { readFile } = vi.hoisted(() => ({ readFile: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ readFile }));
 
-import { buildQueryApiPlugin } from '../src/local/queryApiPlugin';
+import { buildQueryApiPlugin, HISTORY_LIMIT } from '../src/local/queryApiPlugin';
 
 // ここでの req.url は、Connect が '/api/query' のマウントプレフィックスを剥がした
 // あとに渡すもの（Vite に同梱された connect のソースを読んで実装計画で確認済み）
@@ -67,6 +67,12 @@ async function runSql(handler: Connect.NextHandleFunction, sql: string, mode: 'd
   const res = makeRes();
   await handler(makeReq('POST', '/', JSON.stringify({ sql, mode })), res as never, vi.fn());
   return { status: res.statusCode, body: JSON.parse(res.body) };
+}
+
+async function getHistory(handler: Connect.NextHandleFunction) {
+  const res = makeRes();
+  await handler(makeReq('GET', '/history'), res as never, vi.fn());
+  return JSON.parse(res.body).history;
 }
 
 beforeEach(() => {
@@ -201,6 +207,78 @@ describe('buildQueryApiPlugin', () => {
 
     expect(JSON.parse(resA.body).results[0].error).toBeUndefined();
     expect(JSON.parse(resB.body).results[0].error).toBeUndefined();
+  });
+
+  it('QUERY-API-11: GET /api/query/history — 初期状態は空配列', async () => {
+    readFile.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+
+    expect(await getHistory(handler)).toEqual([]);
+  });
+
+  it('QUERY-API-12: POST /api/query の成功/parseError/文エラーがそれぞれ履歴に記録される', async () => {
+    readFile.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+
+    await runSql(handler, 'CREATE TABLE users (id INT)', 'design');
+    await runSql(handler, 'SELECT * FROM users', 'design'); // モードゲート違反 → parseError
+    await runSql(handler, 'INSERT INTO ghost (id) VALUES (1)', 'experiment'); // Postgresエラー
+
+    const history = await getHistory(handler);
+    expect(history).toHaveLength(3);
+
+    expect(history[0]).toMatchObject({
+      seq: 1,
+      sql: 'CREATE TABLE users (id INT)',
+      mode: 'design',
+      ok: true,
+      statements: [{ label: 'CREATE TABLE users (1 cols)' }],
+    });
+    expect(typeof history[0].at).toBe('string');
+
+    expect(history[1]).toMatchObject({
+      seq: 2,
+      ok: false,
+      parseError: expect.stringContaining('is not allowed in design mode'),
+      statements: [],
+    });
+
+    expect(history[2]).toMatchObject({ seq: 3, ok: false });
+    expect(history[2].statements[0].error).toBeDefined();
+  });
+
+  it('QUERY-API-13: HISTORY_LIMIT を超えると最も古いエントリから破棄される（seqは再利用しない）', async () => {
+    readFile.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+
+    for (let i = 0; i < HISTORY_LIMIT + 1; i++) {
+      await runSql(handler, 'SELECT 1', 'design'); // design中のselectはparseErrorになるだけで十分軽い
+    }
+
+    const history = await getHistory(handler);
+    expect(history).toHaveLength(HISTORY_LIMIT);
+    expect(history[0].seq).toBe(2); // seq=1は破棄され、再利用もされていない
+    expect(history[history.length - 1].seq).toBe(HISTORY_LIMIT + 1);
+  });
+
+  it('QUERY-API-14: POST /api/query/reset を挟んでも履歴はクリアされない', async () => {
+    readFile.mockResolvedValue('CREATE TABLE users (id INT);');
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+
+    await runSql(handler, 'CREATE TABLE extra (id INT)', 'design');
+    expect(await getHistory(handler)).toHaveLength(1);
+
+    const resetRes = makeRes();
+    await handler(makeReq('POST', '/reset'), resetRes as never, vi.fn());
+    expect(JSON.parse(resetRes.body)).toEqual({ ok: true, error: null });
+
+    const history = await getHistory(handler);
+    expect(history).toHaveLength(1);
+    expect(history[0].sql).toBe('CREATE TABLE extra (id INT)');
   });
 
   it('/api/query以外のメソッド(GET/POST以外)は next() に委譲する', async () => {
