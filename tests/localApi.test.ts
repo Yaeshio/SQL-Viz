@@ -228,6 +228,58 @@ describe('buildApiPlugin', () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 
+  it('Issue #38: POST /api/schema 成功時、絶対パス付きでconsole.logへログを出す', async () => {
+    mkdir.mockResolvedValueOnce(undefined);
+    writeFile.mockResolvedValueOnce(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const handler = getHandler('/abs/schema/ddl.sql');
+
+    await handler(makeReq('POST', JSON.stringify({ content: 'x' })), makeRes() as never, vi.fn());
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('/abs/schema/ddl.sql'));
+    logSpy.mockRestore();
+  });
+
+  it('Issue #38: readOnlyでの拒否時、console.errorへログを出す', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const handler = getHandler('/abs/schema/ddl.sql', { readOnly: true });
+
+    await handler(makeReq('POST', JSON.stringify({ content: 'x' })), makeRes() as never, vi.fn());
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('/abs/schema/ddl.sql'));
+    errorSpy.mockRestore();
+  });
+
+  it('Issue #38: POST /api/schema/verify-save 成功時、書き込み先パス付きでconsole.logへログを出す', async () => {
+    mkdir.mockResolvedValueOnce(undefined);
+    writeFile.mockResolvedValueOnce(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const handler = getHandler('/abs/schema/ddl.sql', { saveDir: '/abs/tmp/verify-saves' });
+
+    await handler(makeReq('POST', JSON.stringify({ content: 'x' }), '/verify-save'), makeRes() as never, vi.fn());
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('/abs/tmp/verify-saves'));
+    logSpy.mockRestore();
+  });
+
+  it('Issue #38: quiet: true のとき、成功時も拒否時もログを一切出さない', async () => {
+    mkdir.mockResolvedValueOnce(undefined);
+    writeFile.mockResolvedValueOnce(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const handler = getHandler('/abs/schema/ddl.sql', { quiet: true });
+    await handler(makeReq('POST', JSON.stringify({ content: 'x' })), makeRes() as never, vi.fn());
+
+    const rejectHandler = getHandler('/abs/schema/ddl.sql', { readOnly: true, quiet: true });
+    await rejectHandler(makeReq('POST', JSON.stringify({ content: 'x' })), makeRes() as never, vi.fn());
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   it('saveDir未指定時のPOST /api/schema/verify-saveは対象ファイルと同じディレクトリへ書き込む', async () => {
     mkdir.mockResolvedValueOnce(undefined);
     writeFile.mockResolvedValueOnce(undefined);

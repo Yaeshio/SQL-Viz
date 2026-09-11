@@ -91,6 +91,14 @@ interface RunResult {
   並行/連続してリクエストを送った場合でも内部状態（`ctidMap`等）が
   破損しないための最低限の要件であり、複数クライアント間のセッション分離
   （6節で対象外とする別問題）とは異なる。
+- 実行のたびに、SQL全文・`mode`・成功/失敗（parseError/文エラーの内容）・
+  ISO8601タイムスタンプを含むプレーンテキスト1行を`npm run sql-studio`の
+  ターミナルへ出力する（Issue #38）——ブラウザを介さないヘッドレスな
+  実行にはこれが唯一の実行結果の可視化手段になる。監査ログである
+  `GET /api/query/history`（Issue #37、後述）とは別物で、こちらはDB状態を
+  持たずリアルタイムに標準出力へ流すだけ。`GET /state`・`/health`・
+  `/history`、および`POST /reset`はログ対象外。`npm run sql-studio --
+  <path> --quiet`でこの出力を抑制できる。
 
 ### `GET /api/query/state`
 
@@ -280,6 +288,8 @@ npmを介さず`node scripts/query.mjs "<SQL>"`を直接呼び出すこと。後
 - [Issue #27](https://github.com/Yaeshio/SQL-Viz/issues/27)
 - [Issue #37](https://github.com/Yaeshio/SQL-Viz/issues/37) — 実行履歴・
   再実行(replay)機能（`GET /api/query/history`、CLI `--history`/`--replay`）
+- [Issue #38](https://github.com/Yaeshio/SQL-Viz/issues/38) — `POST /api/query`
+  実行結果のターミナルへのリアルタイムなログ出力（`--quiet`で抑制可能）
 - [local-cli-sync-spec.md](./local-cli-sync-spec.md) — ローカルサーバー基盤・
   DDLファイルブートストラップの共有ロジック
 - [mode-and-sql-scope-spec.md](./mode-and-sql-scope-spec.md) — design/
