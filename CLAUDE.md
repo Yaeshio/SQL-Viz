@@ -369,6 +369,21 @@ mode, at, ok, parseError?, statements[]}` の要約。`DBState` は持たない�
 履歴は監査ログとして扱い `POST /api/query/reset` ではクリアしない（消えるのは
 プロセス終了時のみ）。
 
+Issue #38 で、`src/local/apiPlugin.ts`（スキーマ保存）・
+`src/local/queryApiPlugin.ts`（`POST /api/query`）の両ハンドラに、
+プレーンテキスト・ISO8601タイムスタンプ付き1行のターミナルログ出力を
+追加した（両者で共有する `logInfo`/`logWarn` ヘルパーを `httpUtils.ts` に
+新設。成功系は `console.log`、拒否/失敗系は `console.error`）。スキーマ
+保存は書き込み先の絶対パスと操作種別（通常保存/verify-save/verifyモード
+での拒否）を、SQL実行はSQL全文（省略なし）・`mode`・成功/失敗/エラー内容を
+含む。GET系エンドポイント（`GET /api/schema`、`GET /api/query/state`/
+`/health`/`/history`）と `POST /api/query/reset` はポーリング/対象外の
+ためログしない。Issue #37の実行履歴（振り返り・replay用の監査ログ）とは
+目的が異なり重複しない——本Issueはサーバープロセスの標準出力への
+リアルタイムな出力が目的。`npm run sql-studio -- <path> --quiet`で
+この出力を一括抑制できる（`scripts/openLocal.mjs` の `parseArgs`/
+`spawnVite` から両プラグインの `quiet` オプションへ配線）。
+
 Issue #33 で、Issue #27のクエリAPI/CLIとIssue #32の`verify`起動モードを
 組み合わせ、エージェントが改修提案ドキュメント（変更前後のスキーマ抜粋・
 検証に使ったクエリ例）を書き出すワークフローを整備した。新規APIエンド

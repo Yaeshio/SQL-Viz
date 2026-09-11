@@ -8,8 +8,9 @@ import { buildApiPlugin } from '../src/local/apiPlugin.ts';
 import { buildQueryApiPlugin } from '../src/local/queryApiPlugin.ts';
 
 const USAGE =
-  'Usage: npm run sql-studio -- <path/to/schema.sql> [--mode=author|verify] [--save-dir=<path>]\n' +
-  '  --save-dir is only valid together with --mode=verify.';
+  'Usage: npm run sql-studio -- <path/to/schema.sql> [--mode=author|verify] [--save-dir=<path>] [--quiet]\n' +
+  '  --save-dir is only valid together with --mode=verify.\n' +
+  '  --quiet suppresses the terminal logging of schema saves and SQL executions.';
 const DEFAULT_URL = 'http://127.0.0.1:5173/';
 const DEFAULT_VERIFY_SAVE_DIR = path.join(os.tmpdir(), 'sql-viz-verify-saves');
 
@@ -21,21 +22,25 @@ export function resolveDdlPath(arg, cwd = process.cwd()) {
  * プレフィックス一致で argv から抜き出し、それ以外は位置引数（DDL ファイルの
  * パス）として扱う。`mode` の既定は 'author'（現状の無制限な挙動）。
  * `saveDir` は未指定のとき undefined のままにしておくことで、`main()` が
- * 「未指定」と「明示的に既定値を指定」を区別できるようにする。 */
+ * 「未指定」と「明示的に既定値を指定」を区別できるようにする。
+ * `--quiet`（Issue #38）は query.mjs の `--history` と同じ値なしブールフラグ。 */
 export function parseArgs(argv) {
   let mode = 'author';
   let saveDir;
+  let quiet = false;
   const positional = [];
   for (const arg of argv) {
     if (arg.startsWith('--mode=')) {
       mode = arg.slice('--mode='.length);
     } else if (arg.startsWith('--save-dir=')) {
       saveDir = arg.slice('--save-dir='.length);
+    } else if (arg === '--quiet') {
+      quiet = true;
     } else {
       positional.push(arg);
     }
   }
-  return { filePathArg: positional[0], mode, saveDir };
+  return { filePathArg: positional[0], mode, saveDir, quiet };
 }
 
 export function openBrowser(url, platform = process.platform) {
@@ -67,7 +72,7 @@ export function openBrowser(url, platform = process.platform) {
  * `cacheDir` の既定は Vite 自身のもの（`node_modules/.vite`）。Docker イメージは
  * SQL_STUDIO_CACHE_DIR 経由でこれを誰でも書けるパスへ向け、非 root の
  * `docker run --user` でも依存事前バンドルのキャッシュを書けるようにする。
- * @param {{ filePath: string, port?: number, mode?: 'author' | 'verify', saveDir?: string, host?: string, cacheDir?: string }} opts */
+ * @param {{ filePath: string, port?: number, mode?: 'author' | 'verify', saveDir?: string, host?: string, cacheDir?: string, quiet?: boolean }} opts */
 export async function spawnVite({
   filePath,
   port,
@@ -75,11 +80,15 @@ export async function spawnVite({
   saveDir = undefined,
   host = '127.0.0.1',
   cacheDir = undefined,
+  quiet = false,
 }) {
   process.env.VITE_LOCAL_FILE = 'true';
   process.env.VITE_STARTUP_MODE = mode;
   const server = await createServer({
-    plugins: [buildApiPlugin(filePath, { readOnly: mode === 'verify', saveDir }), buildQueryApiPlugin(filePath)],
+    plugins: [
+      buildApiPlugin(filePath, { readOnly: mode === 'verify', saveDir, quiet }),
+      buildQueryApiPlugin(filePath, { quiet }),
+    ],
     server: { host, port, open: false },
     ...(cacheDir ? { cacheDir } : {}),
   });
@@ -88,7 +97,7 @@ export async function spawnVite({
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const { filePathArg, mode, saveDir } = parseArgs(argv);
+  const { filePathArg, mode, saveDir, quiet } = parseArgs(argv);
   if (!filePathArg || (mode !== 'author' && mode !== 'verify') || (saveDir !== undefined && mode !== 'verify')) {
     process.stderr.write(`${USAGE}\n`);
     process.exit(1);
@@ -102,7 +111,7 @@ export async function main(argv = process.argv.slice(2)) {
   // 通常の `npm run sql-studio` 経路では未設定なので spawnVite の既定値が効く。
   const host = process.env.SQL_STUDIO_HOST || undefined;
   const cacheDir = process.env.SQL_STUDIO_CACHE_DIR || undefined;
-  const server = await spawnVite({ filePath, mode, saveDir: resolvedSaveDir, host, cacheDir });
+  const server = await spawnVite({ filePath, mode, saveDir: resolvedSaveDir, host, cacheDir, quiet });
   server.printUrls();
   console.log(
     '改修提案ドキュメントの書き方: https://github.com/Yaeshio/SQL-Viz/blob/main/docs/agent-proposal-workflow-spec.md',

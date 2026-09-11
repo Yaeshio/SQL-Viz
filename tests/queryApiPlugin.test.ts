@@ -38,9 +38,9 @@ function makeRes(): FakeRes {
   };
 }
 
-function getHandler(filePath: string): Connect.NextHandleFunction {
+function getHandler(filePath: string, options?: { quiet?: boolean }): Connect.NextHandleFunction {
   const use = vi.fn();
-  const plugin = buildQueryApiPlugin(filePath);
+  const plugin = buildQueryApiPlugin(filePath, options);
   const configureServer = plugin.configureServer as unknown as (server: {
     middlewares: { use: typeof use };
   }) => void;
@@ -279,6 +279,59 @@ describe('buildQueryApiPlugin', () => {
     const history = await getHistory(handler);
     expect(history).toHaveLength(1);
     expect(history[0].sql).toBe('CREATE TABLE extra (id INT)');
+  });
+
+  it('Issue #38: POST /api/query 成功時、mode・SQL全文付きでconsole.logへログを出す', async () => {
+    readFile.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runSql(handler, 'CREATE TABLE users (id INT)', 'design');
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('design'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('CREATE TABLE users (id INT)'));
+    logSpy.mockRestore();
+  });
+
+  it('Issue #38: parseError（モードゲート違反）時、console.errorへログを出す', async () => {
+    readFile.mockResolvedValue('CREATE TABLE users (id INT);');
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runSql(handler, 'SELECT * FROM users', 'design');
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('SELECT * FROM users'));
+    errorSpy.mockRestore();
+  });
+
+  it('Issue #38: 文実行エラー時、console.errorへログを出す', async () => {
+    readFile.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runSql(handler, 'INSERT INTO ghost (id) VALUES (1)', 'experiment');
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ghost (id) VALUES (1)'));
+    errorSpy.mockRestore();
+  });
+
+  it('Issue #38: quiet: true のとき、成功時も失敗時もログを一切出さない', async () => {
+    readFile.mockResolvedValue('CREATE TABLE users (id INT);');
+    const handler = getHandler('/abs/schema.sql', { quiet: true });
+    await waitForReady(handler);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runSql(handler, 'SELECT * FROM users', 'design'); // parseError側
+    await runSql(handler, 'CREATE TABLE extra (id INT)', 'design'); // 成功側
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('/api/query以外のメソッド(GET/POST以外)は next() に委譲する', async () => {

@@ -120,6 +120,13 @@ Contents API へ直接 push することでスキーマを永続化していた�
 ネットワーク到達範囲（非Docker経路は `127.0.0.1` バインド、Docker経路は
 ポート公開の指定に依存）については5節を参照。
 
+`POST /api/schema`・`POST /api/schema/verify-save` はいずれも、実行時に
+プレーンテキスト1行のログを`npm run sql-studio`のターミナルへ出力する
+（Issue #38）。書き込み先の絶対パス・操作種別（通常保存/verify-save/
+verifyモードでの拒否）・ISO8601タイムスタンプを含む。`GET /api/schema`は
+ポーリングされうるためログ対象外。`npm run sql-studio -- <path> --quiet`で
+この出力を抑制できる。
+
 ## 4. ホスティング版との違い
 
 ローカルモードの検出は `VITE_LOCAL_FILE` というビルド時環境変数で行う
@@ -167,6 +174,8 @@ Contents API へ直接 push することでスキーマを永続化していた�
 
 - [Issue #26](https://github.com/Yaeshio/SQL-Viz/issues/26)
 - [Issue #31](https://github.com/Yaeshio/SQL-Viz/issues/31)（Docker 経由の起動手段）
+- [Issue #38](https://github.com/Yaeshio/SQL-Viz/issues/38) — スキーマ保存
+  操作のターミナルへのログ出力（`--quiet`で抑制可能）
 - 実装詳細: [local-cli-sync-design.md](./local-cli-sync-design.md)
 - Docker イメージ: [docker/sql-studio/README.md](../docker/sql-studio/README.md)、
   E2E 検証手順書: [docs/issue31-docker-e2e-runbook.md](./issue31-docker-e2e-runbook.md)

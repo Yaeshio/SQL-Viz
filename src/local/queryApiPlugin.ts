@@ -3,10 +3,16 @@ import type { ServerResponse } from 'node:http';
 import type { AppMode } from '../types';
 import { WORLD_W } from '../layout.ts';
 import { PgEngine, type RunResult } from '../pglite/engine.ts';
-import { errorMessage, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
+import { errorMessage, logInfo, logWarn, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
 
 function isAppMode(value: unknown): value is AppMode {
   return value === 'design' || value === 'experiment';
+}
+
+export interface QueryApiPluginOptions {
+  /** trueならこのプラグインのターミナルログ出力（Issue #38）を一切抑制する。
+   * CLIの`--quiet`から配線される。 */
+  quiet?: boolean;
 }
 
 /** GET /api/query/history（Issue #37）の1エントリ。DBState全体は持たず、
@@ -33,7 +39,8 @@ export const HISTORY_LIMIT = 200;
  * インスタンスとは完全に独立で、scripts/openLocal.mjs が CLI 起動時に渡されたのと
  * 同じ DDL ファイルからブートストラップされる（reset 時も同じファイルから
  * 再ブートストラップする）。 */
-export function buildQueryApiPlugin(filePath: string): Plugin {
+export function buildQueryApiPlugin(filePath: string, options: QueryApiPluginOptions = {}): Plugin {
+  const { quiet = false } = options;
   const engine = new PgEngine();
   let queue: Promise<unknown> = Promise.resolve();
   let bootstrapDone = false;
@@ -52,6 +59,23 @@ export function buildQueryApiPlugin(filePath: string): Plugin {
       statements: result.results.map((r) => (r.error ? { label: r.label, error: r.error } : { label: r.label })),
     });
     if (history.length > HISTORY_LIMIT) history.shift();
+  }
+
+  /** POST /api/query の実行結果をターミナルへ1行出力する（Issue #38）。
+   * recordHistory と異なり監査用の永続状態は持たず、その場でconsoleへ流すだけ。
+   * SQL全文をそのまま出す（省略しない）——履歴機能（Issue #37）も全文を保持して
+   * おり一貫性がある。 */
+  function logQueryResult(sql: string, mode: AppMode, result: RunResult): void {
+    if (result.parseError) {
+      logWarn('query', `${mode} ${sql} → 拒否: ${result.parseError}`, quiet);
+      return;
+    }
+    const failed = result.results.find((r) => r.error);
+    if (failed) {
+      logWarn('query', `${mode} ${sql} → エラー: ${failed.error}`, quiet);
+      return;
+    }
+    logInfo('query', `${mode} ${sql} → OK`, quiet);
   }
 
   // 先にエンキューされたタスクがすべて決着（成功でも失敗でも）してから `task` を
@@ -113,6 +137,7 @@ export function buildQueryApiPlugin(filePath: string): Plugin {
     const mode = body.mode;
     const result = await enqueue(() => engine.run(sql, WORLD_W, mode));
     recordHistory(sql, mode, result);
+    logQueryResult(sql, mode, result);
     sendJson(res, 200, result);
   }
 

@@ -1,7 +1,7 @@
 import type { Plugin, ViteDevServer } from 'vite';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
-import { errorMessage, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
+import { errorMessage, logInfo, logWarn, readDdlFile, readRequestBody, sendJson } from './httpUtils.ts';
 
 export interface ApiPluginOptions {
   /** verify モード: 対象ファイルを上書きする代わりに POST /api/schema を拒否する。
@@ -13,6 +13,9 @@ export interface ApiPluginOptions {
    * そのエンドポイントを呼ぶ場合（verify モード）にのみ意味を持つ。verify モードを
    * 有効にしない呼び出し側は省略してよい。 */
   saveDir?: string;
+  /** trueならこのプラグインのターミナルログ出力（Issue #38）を一切抑制する。
+   * CLIの`--quiet`から配線される。 */
+  quiet?: boolean;
 }
 
 /** 元ファイルの拡張子の前にタイムスタンプを挿入する。例:
@@ -32,7 +35,7 @@ export function buildVerifySaveFilename(originalFilePath: string, now: Date = ne
  * バインドするのは呼び出し側（scripts/openLocal.mjs）の責務であり、このプラグインの
  * 責務ではない。 */
 export function buildApiPlugin(filePath: string, options: ApiPluginOptions = {}): Plugin {
-  const { readOnly = false, saveDir } = options;
+  const { readOnly = false, saveDir, quiet = false } = options;
   return {
     name: 'sql-viz-local-api',
     configureServer(server: ViteDevServer) {
@@ -51,6 +54,7 @@ export function buildApiPlugin(filePath: string, options: ApiPluginOptions = {})
 
           if (subpath === '' && req.method === 'POST') {
             if (readOnly) {
+              logWarn('schema', `拒否（検証モードのため保存できません）: ${filePath}`, quiet);
               sendJson(res, 403, { ok: false, error: '検証モードのため保存できません' });
               return;
             }
@@ -68,6 +72,7 @@ export function buildApiPlugin(filePath: string, options: ApiPluginOptions = {})
             }
             await mkdir(dirname(filePath), { recursive: true });
             await writeFile(filePath, body.content, 'utf-8');
+            logInfo('schema', `保存: ${filePath}`, quiet);
             sendJson(res, 200, { ok: true });
             return;
           }
@@ -89,12 +94,14 @@ export function buildApiPlugin(filePath: string, options: ApiPluginOptions = {})
             const savedPath = join(targetDir, buildVerifySaveFilename(filePath));
             await mkdir(targetDir, { recursive: true });
             await writeFile(savedPath, body.content, 'utf-8');
+            logInfo('schema', `verify-save: ${savedPath}`, quiet);
             sendJson(res, 200, { ok: true, path: savedPath });
             return;
           }
 
           next();
         } catch (err) {
+          logWarn('schema', `エラー (${req.method} ${subpath || '/'}): ${errorMessage(err)}`, quiet);
           sendJson(res, 500, { ok: false, error: errorMessage(err) });
         }
       });

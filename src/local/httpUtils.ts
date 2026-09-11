@@ -20,6 +20,22 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** ターミナルへの人間可読なログ出力（Issue #38）。プレーンテキスト1行、
+ * ISO8601タイムスタンプ + `scope`（'schema'/'query'）タグ付き。apiPlugin.ts
+ * とqueryApiPlugin.tsの両方から使う共有ヘルパーなのでhttpUtils.tsに置く。
+ * `quiet`は各プラグインのオプション（CLIの`--quiet`から配線）で、trueなら
+ * 何も出力しない。成功系は`logInfo`（console.log）、拒否・失敗系は
+ * `logWarn`（console.error）を使う。 */
+export function logInfo(scope: string, message: string, quiet = false): void {
+  if (quiet) return;
+  console.log(`[${new Date().toISOString()}] [${scope}] ${message}`);
+}
+
+export function logWarn(scope: string, message: string, quiet = false): void {
+  if (quiet) return;
+  console.error(`[${new Date().toISOString()}] [${scope}] ${message}`);
+}
+
 /** UTF-8 テキストファイルを読み込み、ENOENT はエラーではなく "" として扱う——
  * GET /api/schema と、エージェントクエリ API の起動時/リセット時 DDL
  * ブートストラップで共有する（どちらも「ファイル無し = 空の内容」を必要とし、

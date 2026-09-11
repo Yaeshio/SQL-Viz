@@ -62,12 +62,17 @@ describe('resolveDdlPath', () => {
 });
 
 describe('parseArgs', () => {
-  it('引数なし → filePathArg undefined, mode既定はauthor, saveDir未指定', () => {
-    expect(parseArgs([])).toEqual({ filePathArg: undefined, mode: 'author', saveDir: undefined });
+  it('引数なし → filePathArg undefined, mode既定はauthor, saveDir未指定, quiet既定はfalse', () => {
+    expect(parseArgs([])).toEqual({ filePathArg: undefined, mode: 'author', saveDir: undefined, quiet: false });
   });
 
   it('位置引数のみ → filePathArgに反映、mode既定はauthor', () => {
-    expect(parseArgs(['schema/ddl.sql'])).toEqual({ filePathArg: 'schema/ddl.sql', mode: 'author', saveDir: undefined });
+    expect(parseArgs(['schema/ddl.sql'])).toEqual({
+      filePathArg: 'schema/ddl.sql',
+      mode: 'author',
+      saveDir: undefined,
+      quiet: false,
+    });
   });
 
   it('--mode=/--save-dir= を解析し、positionalから除外する', () => {
@@ -75,6 +80,16 @@ describe('parseArgs', () => {
       filePathArg: 'schema/ddl.sql',
       mode: 'verify',
       saveDir: '/tmp/x',
+      quiet: false,
+    });
+  });
+
+  it('--quiet を解析し、positionalから除外する（Issue #38）', () => {
+    expect(parseArgs(['schema/ddl.sql', '--quiet'])).toEqual({
+      filePathArg: 'schema/ddl.sql',
+      mode: 'author',
+      saveDir: undefined,
+      quiet: true,
     });
   });
 });
@@ -106,8 +121,8 @@ describe('spawnVite', () => {
 
     expect(process.env.VITE_LOCAL_FILE).toBe('true');
     expect(process.env.VITE_STARTUP_MODE).toBe('author');
-    expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { readOnly: false, saveDir: undefined });
-    expect(buildQueryApiPlugin).toHaveBeenCalledWith('/abs/schema.sql');
+    expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { readOnly: false, saveDir: undefined, quiet: false });
+    expect(buildQueryApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { quiet: false });
     expect(createServer).toHaveBeenCalledWith(
       expect.objectContaining({
         plugins: [
@@ -129,7 +144,18 @@ describe('spawnVite', () => {
     await spawnVite({ filePath: '/abs/schema.sql', port: 5199, mode: 'verify', saveDir: '/tmp/x' });
 
     expect(process.env.VITE_STARTUP_MODE).toBe('verify');
-    expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { readOnly: true, saveDir: '/tmp/x' });
+    expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { readOnly: true, saveDir: '/tmp/x', quiet: false });
+  });
+
+  it('quiet: true 指定時、buildApiPlugin/buildQueryApiPluginの両方へquiet: trueが伝播する（Issue #38）', async () => {
+    const listen = vi.fn().mockResolvedValue(undefined);
+    const fakeServer = { listen, resolvedUrls: { local: ['http://127.0.0.1:5199/'] }, printUrls: vi.fn() };
+    createServer.mockResolvedValueOnce(fakeServer);
+
+    await spawnVite({ filePath: '/abs/schema.sql', port: 5199, quiet: true });
+
+    expect(buildApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { readOnly: false, saveDir: undefined, quiet: true });
+    expect(buildQueryApiPlugin).toHaveBeenCalledWith('/abs/schema.sql', { quiet: true });
   });
 
   it('CLI-06: host未指定なら127.0.0.1、cacheDir未指定ならcreateServer引数に含めない', async () => {
@@ -179,7 +205,7 @@ describe('main', () => {
 
     expect(buildApiPlugin).toHaveBeenCalledWith(
       expect.stringContaining('/schema/ddl.sql'),
-      { readOnly: false, saveDir: undefined },
+      { readOnly: false, saveDir: undefined, quiet: false },
     );
     // SQL_STUDIO_HOST 未設定 → spawnVite の既定 127.0.0.1（非 Docker 経路の
     // リグレッションガード）。
@@ -245,6 +271,7 @@ describe('main', () => {
     expect(buildApiPlugin).toHaveBeenCalledWith(expect.stringContaining('/schema/ddl.sql'), {
       readOnly: true,
       saveDir: expectedSaveDir,
+      quiet: false,
     });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(expectedSaveDir));
 
@@ -262,9 +289,25 @@ describe('main', () => {
     expect(buildApiPlugin).toHaveBeenCalledWith(expect.stringContaining('/schema/ddl.sql'), {
       readOnly: true,
       saveDir: '/tmp/custom-dir',
+      quiet: false,
     });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('/tmp/custom-dir'));
 
     logSpy.mockRestore();
+  });
+
+  it('--quiet 指定時、buildApiPlugin/buildQueryApiPluginへquiet: trueで配線される（Issue #38）', async () => {
+    const listen = vi.fn().mockResolvedValue(undefined);
+    const fakeServer = { listen, resolvedUrls: { local: ['http://127.0.0.1:5173/'] }, printUrls: vi.fn() };
+    createServer.mockResolvedValueOnce(fakeServer);
+
+    await main(['schema/ddl.sql', '--quiet']);
+
+    expect(buildApiPlugin).toHaveBeenCalledWith(expect.stringContaining('/schema/ddl.sql'), {
+      readOnly: false,
+      saveDir: undefined,
+      quiet: true,
+    });
+    expect(buildQueryApiPlugin).toHaveBeenCalledWith(expect.stringContaining('/schema/ddl.sql'), { quiet: true });
   });
 });
