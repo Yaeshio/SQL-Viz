@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { clampPan, computeFitTransform, computeWorldBox, KEEP_VISIBLE, WORLD_MARGIN } from '../src/lib/canvasLayout';
-import { TABLE_H, TABLE_W } from '../src/layout';
+import {
+  clampPan,
+  computeFitTransform,
+  computeTableInnerLayout,
+  computeWorldBox,
+  KEEP_VISIBLE,
+  WORLD_MARGIN,
+} from '../src/lib/canvasLayout';
+import { ROW_H, TABLE_H, TABLE_W } from '../src/layout';
 import { makeColumn, makeRow, makeTable } from './test-utils';
 
 function tableWithShape(name: string, columnCount: number, rowCount: number, x = 0, y = 0) {
@@ -8,6 +15,27 @@ function tableWithShape(name: string, columnCount: number, rowCount: number, x =
   const rows = Array.from({ length: rowCount }, (_, i) => makeRow(`${name}-r${i}`, { c0: i }));
   return makeTable(name, columns, rows, x, y);
 }
+
+describe('computeTableInnerLayout — カラム定義行群/データ行群の境界線位置（Issue #51）', () => {
+  it('DIVIDER-01: データ行0件では境界はカードの一番下（カラム定義の直後）に来る', () => {
+    const t = tableWithShape('t', 3, 0);
+    const { dividerY, height } = computeTableInnerLayout(t);
+    expect(dividerY).toBe(height);
+  });
+
+  it('DIVIDER-02: データ行1件では境界は height - ROW_H に一致する（旧固定値実装とも偶然一致するケース）', () => {
+    const t = tableWithShape('t', 3, 1);
+    const { dividerY, height } = computeTableInnerLayout(t);
+    expect(dividerY).toBe(height - ROW_H);
+  });
+
+  it('DIVIDER-03: データ行3件では境界は height - rows.length * ROW_H であり、height - ROW_H（旧実装の誤った値）とは異なる', () => {
+    const t = tableWithShape('t', 3, 3);
+    const { dividerY, height } = computeTableInnerLayout(t);
+    expect(dividerY).toBe(height - t.rows.length * ROW_H);
+    expect(dividerY).not.toBe(height - ROW_H);
+  });
+});
 
 describe('computeWorldBox — 全テーブル外接矩形をtightに包む + 四辺マージン', () => {
   it('WORLDBOX-MIN-01: テーブルが無ければ最小サイズ 800x500・原点(0,0)を返す', () => {
