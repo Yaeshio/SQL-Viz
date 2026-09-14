@@ -4,6 +4,8 @@ import { HEADER_H, ROW_H, COL_GAP, TABLE_H, TABLE_W } from '../layout';
 export interface TableInnerLayout {
   colRows: { col: Column; y: number }[];
   dataRows: { row: Row; y: number }[];
+  /** カラム定義行群とデータ行群の境界の y 座標（区切り線の描画に使う）。 */
+  dividerY: number;
   height: number;
 }
 
@@ -17,13 +19,14 @@ export function computeTableInnerLayout(table: Table): TableInnerLayout {
     return { col: c, y: cy };
   });
   y += COL_GAP / 2;
+  const dividerY = y;
   const dataRows = table.rows.map((r) => {
     const ry = y;
     y += ROW_H;
     return { row: r, y: ry };
   });
   const height = y;
-  return { colRows, dataRows, height };
+  return { colRows, dataRows, dividerY, height };
 }
 
 export interface RowCellLayout {

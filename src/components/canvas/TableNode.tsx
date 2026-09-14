@@ -44,7 +44,7 @@ function TableNode({
     ? new Set(highlight.columns)
     : null;
 
-  const { colRows, dataRows, height } = computeTableInnerLayout(table);
+  const { colRows, dataRows, dividerY, height } = computeTableInnerLayout(table);
   const x = table.x + (dragOffset?.dx ?? 0);
   const y = table.y + (dragOffset?.dy ?? 0);
 
@@ -140,7 +140,7 @@ function TableNode({
         </AnimatePresence>
 
         {/* 区切り線 */}
-        <line x1={8} y1={height - ROW_H} x2={TABLE_W - 8} y2={height - ROW_H} stroke="#334155" strokeWidth={1} />
+        <line x1={8} y1={dividerY} x2={TABLE_W - 8} y2={dividerY} stroke="#334155" strokeWidth={1} />
 
         {/* データ行 */}
         <AnimatePresence>
