@@ -20,6 +20,8 @@ interface Props {
   updatingRows: Set<string>;
   appearingColumns: Set<string>;
   highlight: CanvasHighlight | null;
+  /** SELECT ハイライトを即座に解除する（Issue #52 手動解除、×ボタン）。 */
+  onDismissHighlight?: () => void;
   /** ヘッダーの pointerdown → ドラッグ開始（Issue #34）。ドラッグ自体を追跡するのは
    * Canvas 側で、これはジェスチャーの起点を報告するだけ。 */
   onHeaderPointerDown?: (e: ReactPointerEvent, name: string) => void;
@@ -35,6 +37,7 @@ function TableNode({
   updatingRows,
   appearingColumns,
   highlight,
+  onDismissHighlight,
   onHeaderPointerDown,
   dragOffset,
   isDragging,
@@ -103,6 +106,42 @@ function TableNode({
             {table.name}
           </text>
           <circle cx={TABLE_W - 16} cy={HEADER_H / 2} r={4} fill={isHighlighted ? '#38bdf8' : '#475569'} />
+          {/* SELECT ハイライトの手動解除（Issue #52）。onPointerDown の
+              stopPropagation で親（このヘッダー自身）の onHeaderPointerDown への
+              伝播を止め、×クリックがテーブルドラッグを誤爆しないようにする。
+              react-zoom-pan-pinch のパン除外はクラス名ベース（sqlviz-drag-handle
+              の祖先内）で別途効いているため、ここでは関与しない。 */}
+          {isHighlighted && onDismissHighlight && (
+            <g
+              data-testid="highlight-dismiss-btn"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismissHighlight();
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle cx={TABLE_W - 34} cy={HEADER_H / 2} r={8} fill="#0f172a" stroke="#38bdf8" strokeWidth={1} />
+              <line
+                x1={TABLE_W - 37}
+                y1={HEADER_H / 2 - 3}
+                x2={TABLE_W - 31}
+                y2={HEADER_H / 2 + 3}
+                stroke="#38bdf8"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+              />
+              <line
+                x1={TABLE_W - 37}
+                y1={HEADER_H / 2 + 3}
+                x2={TABLE_W - 31}
+                y2={HEADER_H / 2 - 3}
+                stroke="#38bdf8"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+              />
+            </g>
+          )}
         </g>
 
         {/* カラム定義 */}

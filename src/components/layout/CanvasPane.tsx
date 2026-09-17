@@ -12,6 +12,7 @@ interface Props {
   appearingColumns: Set<string>;
   highlight: CanvasHighlight | null;
   onMoveTable: (name: string, x: number, y: number) => void;
+  onDismissHighlight: () => void;
 }
 
 export default function CanvasPane({
@@ -23,6 +24,7 @@ export default function CanvasPane({
   appearingColumns,
   highlight,
   onMoveTable,
+  onDismissHighlight,
 }: Props) {
   const paneRef = useRef<HTMLElement>(null);
 
@@ -49,6 +51,7 @@ export default function CanvasPane({
           appearingColumns={appearingColumns}
           highlight={highlight}
           onMoveTable={onMoveTable}
+          onDismissHighlight={onDismissHighlight}
         />
       )}
     </section>

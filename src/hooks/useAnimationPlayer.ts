@@ -1,5 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { AnimationEvent } from '../types';
+
+/** SELECT ハイライトを表示し続ける時間（Issue #52）。この時間が経過すると
+ * 自動的に解除される。手動解除（×ボタン）と併用。 */
+const HIGHLIGHT_AUTO_DISMISS_MS = 5000;
 
 export interface AnimationHighlight {
   table: string;
@@ -14,6 +18,8 @@ export interface UseAnimationPlayerResult {
   highlight: AnimationHighlight | null;
   playEvents: (events: AnimationEvent[]) => Promise<void>;
   resetAnimation: () => void;
+  /** SELECT ハイライトを即座に解除する（Issue #52 手動解除）。 */
+  dismissHighlight: () => void;
 }
 
 function delay(ms: number) {
@@ -43,6 +49,18 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
   const [updatingRows, setUpdatingRows] = useState<Set<string>>(new Set());
   const [appearingColumns, setAppearingColumns] = useState<Set<string>>(new Set());
   const [highlight, setHighlight] = useState<AnimationHighlight | null>(null);
+
+  // Issue #52: ハイライトが立っている間だけ自動解除タイマーを張る。diffStates()
+  // は再実行のたびに新しい select_highlight イベント（＝新しい highlight
+  // オブジェクト）を生成するため、同じテーブルへの再 SELECT でも参照が変わり
+  // このeffectは再発火してタイマーがリセットされる。
+  useEffect(() => {
+    if (!highlight) return;
+    const timer = window.setTimeout(() => setHighlight(null), HIGHLIGHT_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [highlight]);
+
+  const dismissHighlight = useCallback(() => setHighlight(null), []);
 
   const playEvents = useCallback(async (events: AnimationEvent[]) => {
     const appearing = new Set<string>();
@@ -118,5 +136,6 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
     highlight,
     playEvents,
     resetAnimation,
+    dismissHighlight,
   };
 }
