@@ -55,6 +55,8 @@ export interface UseSqlRunnerResult {
    * 次の run() を生き延びるように）、アニメーション/差分を介さず即座に state を
    * 更新する——位置の変更はそれ自体が視覚的フィードバックになる。 */
   moveTable: (name: string, x: number, y: number) => void;
+  /** SELECT ハイライトを即座に解除する（Issue #52 手動解除）。 */
+  dismissHighlight: () => void;
 }
 
 /** SQL エディタの入力・DBState・実行ログ/エラー/playing フラグを所有し、
@@ -74,8 +76,16 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
   const [playing, setPlaying] = useState(false);
   const [initializing, setInitializing] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
-  const { appearingRows, filteringRows, updatingRows, appearingColumns, highlight, playEvents, resetAnimation } =
-    useAnimationPlayer();
+  const {
+    appearingRows,
+    filteringRows,
+    updatingRows,
+    appearingColumns,
+    highlight,
+    playEvents,
+    resetAnimation,
+    dismissHighlight,
+  } = useAnimationPlayer();
   const engineRef = useRef<PgEngine>();
   if (!engineRef.current) engineRef.current = new PgEngine();
   const stateRef = useRef(state);
@@ -198,5 +208,6 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     reset,
     getDb,
     moveTable,
+    dismissHighlight,
   };
 }

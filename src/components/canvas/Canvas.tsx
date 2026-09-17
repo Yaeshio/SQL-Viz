@@ -34,6 +34,8 @@ interface Props {
   highlight: CanvasHighlight | null;
   /** 完了したテーブルのドラッグ（Issue #34）を最終ワールド座標で確定する。 */
   onMoveTable: (name: string, x: number, y: number) => void;
+  /** SELECT ハイライトを即座に解除する（Issue #52 手動解除）。 */
+  onDismissHighlight: () => void;
 }
 
 export default function Canvas({
@@ -45,6 +47,7 @@ export default function Canvas({
   appearingColumns,
   highlight,
   onMoveTable,
+  onDismissHighlight,
 }: Props) {
   // テーブルのドラッグ（Issue #34）——下の `world` より前に宣言することで、
   // 進行中のドラッグをそこへ流し込める（worldTables 参照）。pointerdown を
@@ -305,6 +308,7 @@ export default function Canvas({
                     updatingRows={updatingRows}
                     appearingColumns={appearingColumns}
                     highlight={highlight}
+                    onDismissHighlight={onDismissHighlight}
                     onHeaderPointerDown={handleHeaderPointerDown}
                     isDragging={draggingName === t.name}
                     dragOffset={draggingName === t.name ? dragOffset : undefined}
