@@ -26,6 +26,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 配下にフラット配置され、`src/` 直下の純粋ロジック層を相対パスで直接
 import する。
 
+テストファイルの分割方針（Issue #71）：Vitest が並列化するのはファイル単位
+だけなので、PGlite を起動する重いテストが1ファイルに偏ると、そのファイルが
+CI 全体の所要時間を決めてしまう。そのため次のように運用する。
+
+- 新しい SQL 機能領域（JOIN、集約、トランザクション等）のテストは既存の
+  `engine.test.ts` に追記せず、領域ごとの新ファイル（例:
+  `engine.join.test.ts`、`engine.transaction.test.ts`）に置く。`tests/` 直下の
+  フラット配置と `tests/**/*.test.ts` の include は維持する。
+- PGlite を起動するテストファイルが CI 上で他より突出して長くなり、全体の
+  所要時間を決めるようになったら、`describe` 単位で分割する。
+- `PgEngine` を生成するテストは、`afterEach` や `finally` で
+  `engine.close()` を呼んで PGlite インスタンスを解放する（解放しないと
+  1個あたり約190MB残留し、ローカルの `npm test` 全体が OOM で落ちる）。
+
 ## アーキテクチャ
 
 本プロジェクトはバックエンドや永続化を持たないクライアントのみの
@@ -97,7 +111,9 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    （例: `relation "ghost" does not exist`）がそのまま UI に出る。
    `experiment` モードの最初の文実行時に `BEGIN` を遅延発行し、以降の
    `experiment` モード中の全文（複数回のRunをまたいでも）を同一の
-   未コミットトランザクションに乗せる。
+   未コミットトランザクションに乗せる。PGlite の起動（`ensureReady()`）も
+   両ゲートの通過後に行うため、空 SQL・パースエラー・モード違反では
+   PGlite を起動しない（Issue #71）。
 5. `PgEngine.snapshotAfter()`（同ファイル）— PGlite へクエリし直して
    `DBState` を再構築する。`create`/`insert`/`select` に加え、`alter`
    （`ADD COLUMN`/`DROP COLUMN`）・`drop`・`update`・`delete` の分岐も
@@ -148,11 +164,14 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    ロード → `new PGlite()` → `await db.waitReady`）を待つ間
    `initializing` state が `true` になる（Run ボタン無効化・
    「エンジン読込中…」表示、`components/sql-editor/SqlEditorPane.tsx`）。
-   `engine.reset()` は PGlite インスタンスを破棄するため、次回実行時に
-   再度コールドスタートが発生する。`useSqlRunner(initialSql, mode)` は
-   `mode: AppMode`（`hooks/useAppMode.ts`、`App.tsx` が所有）を引数に取り、
-   毎回の `PgEngine.run()` 呼び出しに転送する。`experiment → design` への
-   遷移を検出する内部 `useEffect` が `PgEngine.returnToDesign()` を呼び、
+   `engine.reset()` は PGlite インスタンスを `close()` で解放するため、
+   次回実行時に再度コールドスタートが発生する（Issue #71。状態は即座に
+   初期化し、旧インスタンスの解放だけを実行中の `run()`/`returnToDesign()`
+   の決着後まで遅らせる。`await` できる版が `engine.close()`）。
+   `useSqlRunner(initialSql, mode)` は `mode: AppMode`
+   （`hooks/useAppMode.ts`、`App.tsx` が所有）を引数に取り、毎回の
+   `PgEngine.run()` 呼び出しに転送する。`experiment → design` への遷移を
+   検出する内部 `useEffect` が `PgEngine.returnToDesign()` を呼び、
    その差分を通常のアニメーションとして再生する（`modeTransitioning`
    stateがこの間 `true` になり、Run ボタンと `ModeToggle` を無効化する）。
    `run()` はIssue #26でオプション引数
@@ -322,8 +341,19 @@ Issue #48（Large：`JOIN`／`GROUP BY`・集約。`types.ts` のデータモデ
 ビルド／テスト設定面の補足：`vite.config.ts` は `@electric-sql/pglite` を
 `optimizeDeps.exclude` に指定している（WASM/ワーカーアセットを Vite の
 依存事前バンドル対象から除外するため）。`vitest.config.ts` は
-`testTimeout: 30000` を設定している（各テストが実際に PGlite インスタンス
-を起動するため、純粋な JS ロジックのみのテストより低速になる）。
+`testTimeout: 30000` を設定している（PgEngine を使うテストは実際に PGlite
+インスタンスを起動するため、純粋な JS ロジックのみのテストより低速になる）。
+
+PGlite の起動コストを下げるため、`vitest.config.ts` は Issue #71 で
+`globalSetup`（`tests/pglite-template.global-setup.ts`）と `setupFiles`
+（`tests/pglite-template.setup.ts`）を持つ。globalSetup がテスト実行の最初に
+1回だけ `new PGlite()`（内部で initdb を実行し約1.8秒）を起動して
+`dumpDataDir('none')` したテンプレートを一時ファイルに書き出し、setupFiles が
+`vi.mock('@electric-sql/pglite')` で、引数なしの `new PGlite()` がそれを
+`loadDataDir` として使う（約0.35秒）ようにする。本番コードと各テストは
+書き換えずに、`PgEngine` を経由するすべての経路（queryApiPlugin や
+`spawnVite` 内部のエンジンを含む）に効き、中身は initdb 直後の空の DB なので
+各テストが独立した新しい DB を持つ性質は変わらない。
 
 `@supabase/supabase-js` は依存関係として存在するが、現時点では
 `src/` 内のどこからも利用されていない。
@@ -356,7 +386,9 @@ Issue #27 で、`npm run sql-studio` のサーバープロセスに常駐する 
 `npm run query --`経由だとnpmのバナーがstdoutに混入するため、エージェント
 用途では`npm run --silent query --`かnode直接呼び出しを使うこと）。
 サーバー側セッションはブラウザ側の未保存キャンバス状態とは
-リアルタイム同期しない、完全に独立した`PgEngine`インスタンス。詳細仕様は
+リアルタイム同期しない、完全に独立した`PgEngine`インスタンス。この
+インスタンスはサーバー終了時（Vite が `server.close()` で呼ぶプラグインの
+`closeBundle` フック）に解放される（Issue #71）。詳細仕様は
 [docs/agent-query-api-spec.md](docs/agent-query-api-spec.md) を参照。
 
 Issue #37 で、`POST /api/query` の実行履歴（成功/失敗問わず、`{seq, sql,
