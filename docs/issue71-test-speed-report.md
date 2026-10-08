@@ -60,19 +60,71 @@
 
 ## ブラウザの Reset 経路の確認
 
-この環境には Docker が無く（WSL Integration が無効）、`tools/visual-check/` は実行できなかった。
-代わりに、ブラウザの Reset ボタン（`useSqlRunner.reset()` → `PgEngine.reset()`）が通るのと
-同じエンジン操作を、Node（型ストリップ）から `src/pglite/engine.ts` を直接 import する
-スクラッチスクリプトで再現した。段階1・段階2の各時点で、以下のすべてが成功した。
+### エンジン単体（Node、段階1・段階2の各時点）
 
-- A. コールドスタート中に Reset → 古い初期化は `db` に代入されずに解放され
-  （`closed === true`）、次の Run は新しいインスタンスで成功する。
-- B. 複数文の `run()` の実行中に Reset → `run()` は全文エラー無く完走し、旧インスタンスは
+ブラウザの Reset ボタン（`useSqlRunner.reset()` → `PgEngine.reset()`）が通るのと同じエンジン
+操作を、Node（型ストリップ）から `src/pglite/engine.ts` を直接 import するスクラッチスクリプトで
+再現した。以下のすべてが成功した。
+
+- コールドスタート中に Reset → 古い初期化は `db` に代入されずに解放され（`closed === true`）、
+  次の Run は新しいインスタンスで成功する。
+- 複数文の `run()` の実行中に Reset → `run()` は全文エラー無く完走し、旧インスタンスは
   その決着後に解放される（実行中は `closed === false`）。
-- C. Run → Reset → 同じ `CREATE TABLE` を Run → `already exists` にならない（新しい空の DB）。
-- D. experiment モードで INSERT 後に Reset → `returnToDesign()` は `null` を返し、新しい
+- Run → Reset → 同じ `CREATE TABLE` を Run → `already exists` にならない（新しい空の DB）。
+- experiment モードで INSERT 後に Reset → `returnToDesign()` は `null` を返し、新しい
   インスタンスへ `ROLLBACK` を送らない。
-- E. 一度も起動していないエンジンの `close()` を2回呼んでも何も起きない。
+- 一度も起動していないエンジンの `close()` を2回呼んでも何も起きない。
+
+### 実ブラウザ（2026-10-08、ブランチ先頭 b86d12c）
+
+`tools/visual-check/` の Docker イメージ（Playwright 1.61.1 / Chromium）を使い、スクラッチの
+Playwright スクリプトを `--entrypoint node` で実行した（`tools/visual-check/` 自体は無改修）。
+同じスクリプトを、別 worktree で起動した main（12e778b）の dev サーバーにも当てて比較した。
+
+**`npm run dev`（Vercel 本番と同じ静的 SPA）** — ブランチ・main とも、console 確認を除く
+16 項目すべて成功（console については末尾の既存の警告を参照）。
+
+- A. 初回 Run で「エンジン読込中…」が表示され、CREATE TABLE が成功する。
+- B. Run → Reset → Run: Reset でテーブルが消え（tables=0）、次の Run で再びコールドスタート
+  が起き、同じ CREATE がエラーにならない。
+- C. コールドスタート中に Reset → 画面はエラーにならず、その後 Reset → Run も正常。
+- D. 実験モードで INSERT 2行 + SELECT（rows=2）→ Reset → 設計モードに戻り tables=0/rows=0 →
+  同名テーブルを作り直せる。
+- E. 実験モードで INSERT → 設計モードへ戻すと ROLLBACK され rows=0（`returnToDesign()`）。
+- F. パースエラー・モード違反（設計モードの SELECT）がエラー表示され、その後の CREATE は成功。
+
+main への1回目の実行では D の最後の CREATE が「エンジン読込中…」のまま 30 秒でタイムアウト
+したが、D だけの切り出しと2回目の全体実行では main も成功しており、一過性の遅延と判断した。
+
+**ローカルCLIモード（`npm run sql-studio -- <schema.sql>`、ブランチのみ）** — 3/3 項目成功。
+
+- スキーマファイルの2テーブルが起動時に自動ロードされる。
+- Reset → 新しい CREATE を Run → Save で、スキーマファイルが Reset 後のテーブルだけの DDL に
+  書き換わる（Reset 後の現行インスタンスから DDL を生成できている）。
+- SIGTERM を送ると、Vite の `server.close()`（→ プラグインの `closeBundle` → `engine.close()`）を
+  経て 105ms で exit code 0 で終了し、エラー出力は無い。
+
+**メモリ** — Run → Reset を8回繰り返し、各回の後に CDP で GC を2回かけてから Chromium
+レンダラープロセスの RSS を測った（MiB）。
+
+| | 読込直後 | 1回後 | 2回後 | 8回後 |
+|---|---|---|---|---|
+| main | 172 | 461 | 666 | 671 |
+| ブランチ | 171 | 262 | 265 | 269 |
+
+main も際限なく増えるわけではないが、Reset 後も約400MiB 多く保持し続ける。ブランチでは
+Reset のたびに旧インスタンスが解放され、1インスタンス分で横ばいになる。
+
+**既存の挙動として確認したこと（main と同じ、本 PR では変更していない）**
+
+- コールドスタート中に Reset すると、実行中だった Run は新しいインスタンスでもう一度
+  コールドスタートしてから完了する（テーブルが1つ残る）。この2回目の起動中は
+  「エンジン読込中…」が表示されず、Run ボタンが一時的に押せる状態になる。Reset 後6秒間の
+  ボタン表示の遷移は、ブランチと main の1回目の実行で同一（「エンジン読込中…(disabled) →
+  Run SQL → Run SQL(disabled) → Running…(disabled) → Run SQL」）だった。
+- console には、どのページ読込でも `react-zoom-pan-pinch` の `TransformComponent` に関する
+  React の開発時警告（`` `ref` is not a prop ``）が1件ずつ出る。main でも同じで、本 PR の
+  変更箇所とは無関係。
 
 ## 補足
 
