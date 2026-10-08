@@ -95,13 +95,16 @@ export function buildQueryApiPlugin(filePath: string, options: QueryApiPluginOpt
   // 独立した「このプロセスで何を実行したか」の監査ログであり、reset（破壊的DB
   // リセット）を跨いで残る唯一のセッション状態とする。
   async function resetAndBootstrap(): Promise<void> {
-    engine.reset();
     bootstrapError = null;
     try {
+      // キュー内なので実行中の文は無い。新しいインスタンスを起動する前に旧インスタンスを
+      // 解放する（Issue #71）。
+      await engine.close();
+      // GET /api/query/health が報告するのは PGlite のコールドスタート完了なので、
+      // ここで明示的に起動する。run() はゲートを通過した文があるときしか起動しない
+      // ため（Issue #71）、空ファイルや DDL のパースエラーでも起動させるにはこれが要る。
+      await engine.ensureReady();
       const content = await readDdlFile(filePath);
-      // 空ファイルでも実行する: run() は実行すべき文があるか調べる前に必ず
-      // ensureReady() を呼ぶため、これが GET /api/query/health の報告対象である
-      // PGlite のコールドスタートを引き起こす。
       const result = await engine.run(content, WORLD_W, 'design');
       if (result.parseError) {
         bootstrapError = result.parseError;
@@ -177,6 +180,12 @@ export function buildQueryApiPlugin(filePath: string, options: QueryApiPluginOpt
           sendJson(res, 500, { error: errorMessage(err) });
         }
       });
+    },
+    // Vite は dev でも server.close() 時に closeBundle を呼ぶ。CLI 終了時や結合テストの
+    // server.close() で、このセッションの PGlite インスタンスを解放する（Issue #71）。
+    // キュー経由にして、実行中の文/リセットを途中で閉じないようにする。
+    closeBundle() {
+      return enqueue(() => engine.close());
     },
   };
 }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PgEngine } from '../src/pglite/engine';
 import { generateDdl } from '../src/pglite/ddlExport';
 
@@ -9,6 +9,9 @@ let engine: PgEngine;
 beforeEach(() => {
   engine = new PgEngine();
 });
+
+// 各テストのPGliteインスタンスを解放する（Issue #71。解放しないと1個あたり約190MB残留する）。
+afterEach(() => engine.close());
 
 describe('generateDdl', () => {
   it('DDL-01: 単一テーブルのカラム名・型・VARCHARの長さを保持したDDLを生成する', async () => {
@@ -42,11 +45,15 @@ describe('generateDdl', () => {
     const original = await generateDdl(engine.getDb()!, ['users', 'posts']);
 
     const roundTripEngine = new PgEngine();
-    const { parseError } = await roundTripEngine.run(original, CANVAS_W, 'design');
-    expect(parseError).toBeUndefined();
-    const roundTripped = await generateDdl(roundTripEngine.getDb()!, ['users', 'posts']);
+    try {
+      const { parseError } = await roundTripEngine.run(original, CANVAS_W, 'design');
+      expect(parseError).toBeUndefined();
+      const roundTripped = await generateDdl(roundTripEngine.getDb()!, ['users', 'posts']);
 
-    expect(roundTripped).toBe(original);
+      expect(roundTripped).toBe(original);
+    } finally {
+      await roundTripEngine.close();
+    }
   });
 
   it('DDL-05: テーブルが1つもない場合は空文字列を返す', async () => {

@@ -50,15 +50,20 @@ export function makeState(tables: Table[], order?: string[], lastSelect: DBState
 export async function runSqlStatements(sqlList: string[]): Promise<{ state: DBState; events: AnimationEvent[] }[]> {
   const engine = new PgEngine();
   const results: { state: DBState; events: AnimationEvent[] }[] = [];
-  for (const sql of sqlList) {
-    const { statements } = parseSql(sql);
-    const mode: AppMode = statements[0] && STRUCTURAL_TYPES.has(statements[0].type) ? 'design' : 'experiment';
-    const { results: stmtResults, parseError } = await engine.run(sql, CANVAS_W, mode);
-    if (parseError) throw new Error(parseError);
-    for (const r of stmtResults) {
-      if (r.error) throw new Error(r.error);
-      results.push({ state: r.state, events: r.events });
+  try {
+    for (const sql of sqlList) {
+      const { statements } = parseSql(sql);
+      const mode: AppMode = statements[0] && STRUCTURAL_TYPES.has(statements[0].type) ? 'design' : 'experiment';
+      const { results: stmtResults, parseError } = await engine.run(sql, CANVAS_W, mode);
+      if (parseError) throw new Error(parseError);
+      for (const r of stmtResults) {
+        if (r.error) throw new Error(r.error);
+        results.push({ state: r.state, events: r.events });
+      }
     }
+  } finally {
+    // 呼び出し側にはエンジンを返さないので、ここで PGlite インスタンスを解放する（Issue #71）。
+    await engine.close();
   }
   return results;
 }
