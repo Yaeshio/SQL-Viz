@@ -270,8 +270,6 @@ export class PgEngine {
   }
 
   private async runImpl(sql: string, worldWidth: number, mode: AppMode): Promise<RunResult> {
-    const db = await this.readyDb();
-
     const rawStatements = splitStatements(sql);
     if (rawStatements.length === 0) return { results: [] };
 
@@ -295,6 +293,10 @@ export class PgEngine {
         parseError: `Statement type "${disallowed.stmt.type}" is not allowed in ${mode} mode`,
       };
     }
+
+    // PGlite は両ゲートを通過してから起動する。空 SQL・パースエラー・モード違反では
+    // 実行する文が無いので、コールドスタートを払わない（Issue #71）。
+    const db = await this.readyDb();
 
     // experiment トランザクションは、モードトグル自体ではなく、実際に実行される
     // 最初の experiment モードの文で遅延的に開く。そのため、何も実行せずにモードを
