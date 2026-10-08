@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connect } from 'vite';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Connect, Plugin } from 'vite';
 
 const { readFile } = vi.hoisted(() => ({ readFile: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ readFile }));
@@ -38,9 +38,15 @@ function makeRes(): FakeRes {
   };
 }
 
+// getHandler() が起動したプラグイン。各プラグインは内部に PgEngine を持つので、
+// afterEach で closeBundle フック（Vite では server.close() 時に呼ばれる）を呼んで
+// PGlite インスタンスを解放する（Issue #71）。
+const startedPlugins: Plugin[] = [];
+
 function getHandler(filePath: string, options?: { quiet?: boolean }): Connect.NextHandleFunction {
   const use = vi.fn();
   const plugin = buildQueryApiPlugin(filePath, options);
+  startedPlugins.push(plugin);
   const configureServer = plugin.configureServer as unknown as (server: {
     middlewares: { use: typeof use };
   }) => void;
@@ -77,6 +83,12 @@ async function getHistory(handler: Connect.NextHandleFunction) {
 
 beforeEach(() => {
   readFile.mockReset();
+});
+
+afterEach(async () => {
+  for (const plugin of startedPlugins.splice(0)) {
+    await (plugin.closeBundle as () => Promise<void>)();
+  }
 });
 
 describe('buildQueryApiPlugin', () => {

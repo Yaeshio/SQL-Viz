@@ -87,7 +87,14 @@ function buildLabel(stmt: Parsed): string {
  */
 export class PgEngine {
   private db: PGlite | null = null;
+  /** 起動中または起動済みのインスタンス。`db` と別に持つのは、初期化の途中で
+   * close()/reset() された場合でも、その初期化の決着後に close() 側が確実に解放
+   * できるようにするため（Issue #71）。 */
+  private dbPromise: Promise<PGlite> | null = null;
   private readyPromise: Promise<void> | null = null;
+  /** 実行中の run()/returnToDesign() の決着を表す。close()/reset() は旧インスタンスの
+   * 解放をこれの決着まで遅らせ、実行中のクエリを途中で閉じないようにする（Issue #71）。 */
+  private inflight: Promise<void> = Promise.resolve();
   private ctidMaps = new Map<string, Map<string, string>>();
   private rowSeq = 0;
   private lastState: DBState = emptyState();
@@ -144,24 +151,65 @@ export class PgEngine {
 
   ensureReady(): Promise<void> {
     if (!this.readyPromise) {
-      this.readyPromise = (async () => {
+      const dbPromise = (async () => {
         const { PGlite } = await import('@electric-sql/pglite');
         const db = new PGlite();
         await db.waitReady;
-        this.db = db;
+        return db;
       })();
+      this.dbPromise = dbPromise;
+      // 初期化の途中で close()/reset() されていたら、このインスタンスはもう現行では
+      // ない: `db` へは代入せず、解放は close() 側に任せる。
+      this.readyPromise = dbPromise.then((db) => {
+        if (this.dbPromise === dbPromise) this.db = db;
+      });
     }
     return this.readyPromise;
   }
 
-  reset(): void {
+  /** ensureReady() を待って現行のインスタンスを返す。待っている間に close()/reset()
+   * された場合は、新しいインスタンスを起動し直して待つ。 */
+  private async readyDb(): Promise<PGlite> {
+    while (!this.db) await this.ensureReady();
+    return this.db;
+  }
+
+  /** run()/returnToDesign() の Promise を inflight に積む。値は捨てる——積み重ねた
+   * Promise が過去の RunResult を保持し続けないようにするため。 */
+  private track<T>(promise: Promise<T>): Promise<T> {
+    this.inflight = Promise.allSettled([this.inflight, promise]).then(() => undefined);
+    return promise;
+  }
+
+  /**
+   * 背後の PGlite インスタンスを解放し、エンジンを初期状態へ戻す（reset() の await
+   * できる版、Issue #71）。状態のクリアは呼び出し時点で同期的に行い、旧インスタンスの
+   * close() だけを、その時点で実行中の run()/returnToDesign() と旧インスタンスの初期化が
+   * 決着するまで遅らせる。起動したことのないエンジンでは何もしない。close 後も、次の
+   * run()/ensureReady() で新しいインスタンスが起動する（reset() 後と同じ）。
+   */
+  async close(): Promise<void> {
+    const staleDb = this.dbPromise;
+    const inflight = this.inflight;
     this.db = null;
+    this.dbPromise = null;
     this.readyPromise = null;
     this.ctidMaps = new Map();
     this.rowSeq = 0;
     this.lastState = emptyState();
     this.inExperimentTx = false;
     this.designCheckpoint = null;
+    if (!staleDb) return;
+
+    await inflight;
+    const db = await staleDb.catch(() => null);
+    await db?.close();
+  }
+
+  /** close() の同期版。ブラウザの Reset ボタン用で、旧インスタンスの解放は
+   * バックグラウンドで行う。 */
+  reset(): void {
+    void this.close().catch(() => {});
   }
 
   private newRowId(): string {
@@ -182,7 +230,11 @@ export class PgEngine {
    * 変更を捨てることはあり得ない。前回の reset/init 以降 experiment モードに一度も
    * 入っていない（またはすでに復帰済み）の場合は何もしない。
    */
-  async returnToDesign(): Promise<DBState | null> {
+  returnToDesign(): Promise<DBState | null> {
+    return this.track(this.returnToDesignImpl());
+  }
+
+  private async returnToDesignImpl(): Promise<DBState | null> {
     if (!this.inExperimentTx || !this.designCheckpoint) return null;
     const db = this.db!;
     await db.query('ROLLBACK');
@@ -213,9 +265,12 @@ export class PgEngine {
     return new Set(rows.map((r) => ctidMap.get(String(r.__ctid))).filter((id): id is string => !!id));
   }
 
-  async run(sql: string, worldWidth: number, mode: AppMode): Promise<RunResult> {
-    await this.ensureReady();
-    const db = this.db!;
+  run(sql: string, worldWidth: number, mode: AppMode): Promise<RunResult> {
+    return this.track(this.runImpl(sql, worldWidth, mode));
+  }
+
+  private async runImpl(sql: string, worldWidth: number, mode: AppMode): Promise<RunResult> {
+    const db = await this.readyDb();
 
     const rawStatements = splitStatements(sql);
     if (rawStatements.length === 0) return { results: [] };
@@ -283,7 +338,7 @@ export class PgEngine {
           matchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
         }
         await db.query(raw);
-        next = await this.snapshotAfter(stmt, current, matchedIds);
+        next = await this.snapshotAfter(db, stmt, current, matchedIds);
       } catch (e) {
         if (useSavepoint) {
           // ROLLBACK TO は SAVEPOINT を解放しない。あとで RELEASE することで
@@ -307,9 +362,12 @@ export class PgEngine {
     return { results };
   }
 
-  private async snapshotAfter(stmt: Parsed, current: DBState, matchedIds: Set<string> | null = null): Promise<DBState> {
-    const db = this.db!;
-
+  private async snapshotAfter(
+    db: PGlite,
+    stmt: Parsed,
+    current: DBState,
+    matchedIds: Set<string> | null = null,
+  ): Promise<DBState> {
     if (stmt.type === 'create') {
       const next = cloneState(current);
       next.tables[stmt.table] = { name: stmt.table, columns: stmt.columns, rows: [], x: 0, y: 0 };

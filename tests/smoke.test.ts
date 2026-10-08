@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PgEngine } from '../src/pglite/engine';
 import { hasOverlappingTablePositions } from './test-utils';
 
@@ -9,6 +9,9 @@ let engine: PgEngine;
 beforeEach(() => {
   engine = new PgEngine();
 });
+
+// 各テストのPGliteインスタンスを解放する（Issue #71。解放しないと1個あたり約190MB残留する）。
+afterEach(() => engine.close());
 
 describe('A. 正常系（実装済み機能の一気通貫シナリオ）', () => {
   it('SMOKE-01: ゴールデンシナリオ（CREATE→INSERT×3→SELECT）が一気通貫で実行される', async () => {
@@ -147,8 +150,12 @@ describe('B. エラー系（実PostgreSQLが返す妥当なエラー）', () => 
     expect(insertResult.results[0].error).toBe('relation "ghost" does not exist');
 
     const selectEngine = new PgEngine();
-    const selectResult = await selectEngine.run('SELECT * FROM ghost', CANVAS_W, 'experiment');
-    expect(selectResult.results[0].error).toBe('relation "ghost" does not exist');
+    try {
+      const selectResult = await selectEngine.run('SELECT * FROM ghost', CANVAS_W, 'experiment');
+      expect(selectResult.results[0].error).toBe('relation "ghost" does not exist');
+    } finally {
+      await selectEngine.close();
+    }
   });
 
   it('SMOKE-07: 既存と同名のテーブルへのCREATE TABLEは実PostgreSQLの "already exists" エラーになる', async () => {

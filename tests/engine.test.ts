@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PgEngine } from '../src/pglite/engine';
 
 const CANVAS_W = 800;
@@ -8,6 +8,9 @@ let engine: PgEngine;
 beforeEach(() => {
   engine = new PgEngine();
 });
+
+// 各テストのPGliteインスタンスを解放する（Issue #71。解放しないと1個あたり約190MB残留する）。
+afterEach(() => engine.close());
 
 describe('PgEngine — CREATE TABLE', () => {
   it('ENGINE-CREATE-01: 新規テーブルを追加し tables/order/version/lastSelect を更新する', async () => {
