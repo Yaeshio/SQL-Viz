@@ -16,6 +16,13 @@ export interface StatementResult {
 export interface RunResult {
   results: StatementResult[];
   parseError?: string;
+  /** 実行中に close()/reset() された run() は、残りの文を実行せず `results: []` とこれを
+   * 返す（Issue #73）。queryApiPlugin は run と reset を直列化しているので返らない。 */
+  aborted?: true;
+}
+
+function abortedResult(): RunResult {
+  return { results: [], aborted: true };
 }
 
 /** mode-and-sql-scope-spec.md 2節の許可マトリクス。design/experimentは相互排他で、
@@ -29,6 +36,21 @@ interface DesignCheckpoint {
   ctidMaps: Map<string, Map<string, string>>;
   lastState: DBState;
   rowSeq: number;
+}
+
+/** close()/reset() のたびに丸ごと差し替える、DB の中身から導出した状態一式（Issue #73）。
+ * run()/returnToDesign() は開始時の世代を掴んでそれにだけ書き込むので、Reset の時点で
+ * 実行中だった処理は、切り離された古い世代に書き込むだけで新しい世代を汚さない。 */
+interface Generation {
+  ctidMaps: Map<string, Map<string, string>>;
+  rowSeq: number;
+  lastState: DBState;
+  inExperimentTx: boolean;
+  designCheckpoint: DesignCheckpoint | null;
+}
+
+function newGeneration(): Generation {
+  return { ctidMaps: new Map(), rowSeq: 0, lastState: emptyState(), inExperimentTx: false, designCheckpoint: null };
 }
 
 /** experiment トランザクションが開いている間、各文を囲む固定の SAVEPOINT 名。
@@ -95,11 +117,7 @@ export class PgEngine {
   /** 実行中の run()/returnToDesign() の決着を表す。close()/reset() は旧インスタンスの
    * 解放をこれの決着まで遅らせ、実行中のクエリを途中で閉じないようにする（Issue #71）。 */
   private inflight: Promise<void> = Promise.resolve();
-  private ctidMaps = new Map<string, Map<string, string>>();
-  private rowSeq = 0;
-  private lastState: DBState = emptyState();
-  private inExperimentTx = false;
-  private designCheckpoint: DesignCheckpoint | null = null;
+  private gen: Generation = newGeneration();
 
   isReady(): boolean {
     return this.db !== null;
@@ -115,12 +133,12 @@ export class PgEngine {
   /** 最後に計算された DBState。GET /api/query/state（Issue #27）向けに読み取り
    * 専用で公開する——読むだけで、何も実行しない。 */
   getState(): DBState {
-    return this.lastState;
+    return this.gen.lastState;
   }
 
   /**
    * ユーザーのドラッグを記録する（Issue #34）: テーブルを与えられたワールド座標で
-   * manuallyPositioned にマークし、その結果を `this.lastState`——次回の `run()` が
+   * manuallyPositioned にマークし、その結果を `this.gen.lastState`——次回の `run()` が
    * `current` として clone する内部スナップショット——へ書き込む。これがないと、
    * ドラッグはブラウザ自身の DBState コピーにしか届かず、次の文で layoutTables() に
    * 黙って捨てられてしまう。designCheckpoint が開いているときはその
@@ -130,14 +148,15 @@ export class PgEngine {
    * テーブルが存在しない場合（例: ドラッグ中に drop された）は何もしない。
    */
   setTablePosition(name: string, x: number, y: number): DBState {
-    if (!this.lastState.tables[name]) return this.lastState;
-    const next = cloneState(this.lastState);
+    const gen = this.gen;
+    if (!gen.lastState.tables[name]) return gen.lastState;
+    const next = cloneState(gen.lastState);
     next.tables[name] = { ...next.tables[name], x, y, manuallyPositioned: true };
-    this.lastState = next;
+    gen.lastState = next;
 
-    if (this.designCheckpoint?.lastState.tables[name]) {
-      const checkpointState = this.designCheckpoint.lastState;
-      this.designCheckpoint.lastState = {
+    if (gen.designCheckpoint?.lastState.tables[name]) {
+      const checkpointState = gen.designCheckpoint.lastState;
+      gen.designCheckpoint.lastState = {
         ...checkpointState,
         tables: {
           ...checkpointState.tables,
@@ -167,13 +186,6 @@ export class PgEngine {
     return this.readyPromise;
   }
 
-  /** ensureReady() を待って現行のインスタンスを返す。待っている間に close()/reset()
-   * された場合は、新しいインスタンスを起動し直して待つ。 */
-  private async readyDb(): Promise<PGlite> {
-    while (!this.db) await this.ensureReady();
-    return this.db;
-  }
-
   /** run()/returnToDesign() の Promise を inflight に積む。値は捨てる——積み重ねた
    * Promise が過去の RunResult を保持し続けないようにするため。 */
   private track<T>(promise: Promise<T>): Promise<T> {
@@ -183,10 +195,11 @@ export class PgEngine {
 
   /**
    * 背後の PGlite インスタンスを解放し、エンジンを初期状態へ戻す（reset() の await
-   * できる版、Issue #71）。状態のクリアは呼び出し時点で同期的に行い、旧インスタンスの
-   * close() だけを、その時点で実行中の run()/returnToDesign() と旧インスタンスの初期化が
-   * 決着するまで遅らせる。起動したことのないエンジンでは何もしない。close 後も、次の
-   * run()/ensureReady() で新しいインスタンスが起動する（reset() 後と同じ）。
+   * できる版、Issue #71）。状態のクリア（世代の差し替え）は呼び出し時点で同期的に行い、
+   * 旧インスタンスの close() だけを、その時点で実行中の run()/returnToDesign() と旧インスタンスの
+   * 初期化が決着するまで遅らせる。実行中だった run()/returnToDesign() は、次の await から
+   * 戻った時点で打ち切られる（Issue #73）。起動したことのないエンジンでは何もしない。
+   * close 後も、次の run()/ensureReady() で新しいインスタンスが起動する（reset() 後と同じ）。
    */
   async close(): Promise<void> {
     const staleDb = this.dbPromise;
@@ -194,11 +207,7 @@ export class PgEngine {
     this.db = null;
     this.dbPromise = null;
     this.readyPromise = null;
-    this.ctidMaps = new Map();
-    this.rowSeq = 0;
-    this.lastState = emptyState();
-    this.inExperimentTx = false;
-    this.designCheckpoint = null;
+    this.gen = newGeneration();
     if (!staleDb) return;
 
     await inflight;
@@ -212,13 +221,13 @@ export class PgEngine {
     void this.close().catch(() => {});
   }
 
-  private newRowId(): string {
-    return `r${(this.rowSeq++).toString(36)}`;
+  private newRowId(gen: Generation): string {
+    return `r${(gen.rowSeq++).toString(36)}`;
   }
 
-  private cloneCtidMaps(): Map<string, Map<string, string>> {
+  private cloneCtidMaps(gen: Generation): Map<string, Map<string, string>> {
     const copy = new Map<string, Map<string, string>>();
-    for (const [table, inner] of this.ctidMaps) copy.set(table, new Map(inner));
+    for (const [table, inner] of gen.ctidMaps) copy.set(table, new Map(inner));
     return copy;
   }
 
@@ -228,22 +237,25 @@ export class PgEngine {
    * Postgres の ROLLBACK で巻き戻すことによる。構造を変える文は experiment モードでは
    * 決して許可されない（run() のモードゲート）ので、ここでの ROLLBACK がスキーマ
    * 変更を捨てることはあり得ない。前回の reset/init 以降 experiment モードに一度も
-   * 入っていない（またはすでに復帰済み）の場合は何もしない。
+   * 入っていない（またはすでに復帰済み）の場合は何もしない。ROLLBACK の最中に
+   * close()/reset() された場合も、Reset 前の checkpoint を書き戻さずに null を返す（Issue #73）。
    */
   returnToDesign(): Promise<DBState | null> {
     return this.track(this.returnToDesignImpl());
   }
 
   private async returnToDesignImpl(): Promise<DBState | null> {
-    if (!this.inExperimentTx || !this.designCheckpoint) return null;
+    const gen = this.gen;
+    if (!gen.inExperimentTx || !gen.designCheckpoint) return null;
     const db = this.db!;
     await db.query('ROLLBACK');
-    const { ctidMaps, lastState, rowSeq } = this.designCheckpoint;
-    this.ctidMaps = ctidMaps;
-    this.lastState = lastState;
-    this.rowSeq = rowSeq;
-    this.inExperimentTx = false;
-    this.designCheckpoint = null;
+    if (this.gen !== gen) return null;
+    const { ctidMaps, lastState, rowSeq } = gen.designCheckpoint;
+    gen.ctidMaps = ctidMaps;
+    gen.lastState = lastState;
+    gen.rowSeq = rowSeq;
+    gen.inExperimentTx = false;
+    gen.designCheckpoint = null;
     return lastState;
   }
 
@@ -255,9 +267,14 @@ export class PgEngine {
    * 誤認識してしまう。null は「WHERE 句なし、全行が一致」を意味する
    * （SELECT の matchedIds と同じ）。
    */
-  private async resolveMatchedIds(db: PGlite, table: string, where: WhereClause | null): Promise<Set<string> | null> {
+  private async resolveMatchedIds(
+    db: PGlite,
+    gen: Generation,
+    table: string,
+    where: WhereClause | null,
+  ): Promise<Set<string> | null> {
     if (!where) return null;
-    const ctidMap = this.ctidMaps.get(table) ?? new Map<string, string>();
+    const ctidMap = gen.ctidMaps.get(table) ?? new Map<string, string>();
     const { rows } = await db.query<{ __ctid: string }>(
       `SELECT ctid::text AS __ctid FROM ${quoteIdent(table)} WHERE ${quoteIdent(where.column)} ${where.operator} $1`,
       [where.value],
@@ -270,6 +287,9 @@ export class PgEngine {
   }
 
   private async runImpl(sql: string, worldWidth: number, mode: AppMode): Promise<RunResult> {
+    // 開始時点の世代。以降の await から戻ったときに this.gen と違っていれば、その間に
+    // close()/reset() されている（Issue #73）。
+    const gen = this.gen;
     const rawStatements = splitStatements(sql);
     if (rawStatements.length === 0) return { results: [] };
 
@@ -295,26 +315,31 @@ export class PgEngine {
     }
 
     // PGlite は両ゲートを通過してから起動する。空 SQL・パースエラー・モード違反では
-    // 実行する文が無いので、コールドスタートを払わない（Issue #71）。
-    const db = await this.readyDb();
+    // 実行する文が無いので、コールドスタートを払わない（Issue #71）。起動を待つ間に
+    // close()/reset() されたら、新しいインスタンスを起動し直さずに打ち切る（Issue #73）。
+    await this.ensureReady();
+    if (this.gen !== gen) return abortedResult();
+    const db = this.db!;
 
     // experiment トランザクションは、モードトグル自体ではなく、実際に実行される
     // 最初の experiment モードの文で遅延的に開く。そのため、何も実行せずにモードを
     // 切り替えるだけなら何も起きない。experiment モードで行われるすべて（Run を
     // 何回押しても）は、returnToDesign() が巻き戻すまでこの 1 つの未コミット
     // トランザクションに蓄積される。
-    if (mode === 'experiment' && !this.inExperimentTx) {
-      this.designCheckpoint = {
-        ctidMaps: this.cloneCtidMaps(),
-        lastState: this.lastState,
-        rowSeq: this.rowSeq,
+    if (mode === 'experiment' && !gen.inExperimentTx) {
+      const checkpoint: DesignCheckpoint = {
+        ctidMaps: this.cloneCtidMaps(gen),
+        lastState: gen.lastState,
+        rowSeq: gen.rowSeq,
       };
       await db.query('BEGIN');
-      this.inExperimentTx = true;
+      if (this.gen !== gen) return abortedResult();
+      gen.designCheckpoint = checkpoint;
+      gen.inExperimentTx = true;
     }
 
     const results: StatementResult[] = [];
-    let current = this.lastState;
+    let current = gen.lastState;
 
     // experiment トランザクションが開いている間は、各文を SAVEPOINT で囲み、
     // 失敗した文がその文の直前までしか巻き戻らないようにする。これがないと、
@@ -323,9 +348,12 @@ export class PgEngine {
     // すべてのリクエストが——どちらのモードでも——失敗する（Issue #36）。SAVEPOINT は
     // トランザクションブロック内でのみ有効なため inExperimentTx でガードする。
     // design モードの自動コミット文には不要。
-    const useSavepoint = this.inExperimentTx;
+    const useSavepoint = gen.inExperimentTx;
 
     for (const { raw, stmt } of parsed) {
+      // Reset 後の残りの文は旧インスタンスへ送らない。書き込み先は切り離された gen なので
+      // 正しさには影響しないが、早く決着させて close() が旧インスタンスを解放できるようにする。
+      if (this.gen !== gen) return abortedResult();
       const label = buildLabel(stmt);
 
       if (useSavepoint) await db.query(`SAVEPOINT ${STMT_SAVEPOINT}`);
@@ -337,10 +365,10 @@ export class PgEngine {
         // SAVEPOINT の内側で行う。
         let matchedIds: Set<string> | null = null;
         if (stmt.type === 'update' || stmt.type === 'delete') {
-          matchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
+          matchedIds = await this.resolveMatchedIds(db, gen, stmt.table, stmt.where);
         }
         await db.query(raw);
-        next = await this.snapshotAfter(db, stmt, current, matchedIds);
+        next = await this.snapshotAfter(db, gen, stmt, current, matchedIds);
       } catch (e) {
         if (useSavepoint) {
           // ROLLBACK TO は SAVEPOINT を解放しない。あとで RELEASE することで
@@ -360,12 +388,14 @@ export class PgEngine {
       current = laidOut;
     }
 
-    this.lastState = current;
+    if (this.gen !== gen) return abortedResult();
+    gen.lastState = current;
     return { results };
   }
 
   private async snapshotAfter(
     db: PGlite,
+    gen: Generation,
     stmt: Parsed,
     current: DBState,
     matchedIds: Set<string> | null = null,
@@ -376,15 +406,15 @@ export class PgEngine {
       next.order.push(stmt.table);
       next.lastSelect = null;
       next.version++;
-      this.ctidMaps.set(stmt.table, new Map());
+      gen.ctidMaps.set(stmt.table, new Map());
       return next;
     }
 
     if (stmt.type === 'insert') {
       const table = current.tables[stmt.table];
       const next = cloneState(current);
-      const ctidMap = this.ctidMaps.get(stmt.table) ?? new Map<string, string>();
-      this.ctidMaps.set(stmt.table, ctidMap);
+      const ctidMap = gen.ctidMaps.get(stmt.table) ?? new Map<string, string>();
+      gen.ctidMaps.set(stmt.table, ctidMap);
 
       const colList = table.columns.map((c) => quoteIdent(c.name)).join(', ');
       const { rows } = await db.query<Record<string, unknown>>(
@@ -394,7 +424,7 @@ export class PgEngine {
         const ctid = String(r.__ctid);
         let id = ctidMap.get(ctid);
         if (!id) {
-          id = this.newRowId();
+          id = this.newRowId(gen);
           ctidMap.set(ctid, id);
         }
         const values: Row['values'] = {};
@@ -412,7 +442,7 @@ export class PgEngine {
       const next = cloneState(current);
       delete next.tables[stmt.table];
       next.order = next.order.filter((name) => name !== stmt.table);
-      this.ctidMaps.delete(stmt.table);
+      gen.ctidMaps.delete(stmt.table);
       if (next.lastSelect?.table === stmt.table) next.lastSelect = null;
       next.version++;
       return next;
@@ -464,7 +494,7 @@ export class PgEngine {
 
     if (stmt.type === 'delete') {
       const next = cloneState(current);
-      const ctidMap = this.ctidMaps.get(stmt.table);
+      const ctidMap = gen.ctidMaps.get(stmt.table);
       const rows = current.tables[stmt.table].rows.filter((r) => !(matchedIds === null || matchedIds.has(r.id)));
       next.tables[stmt.table] = { ...next.tables[stmt.table], rows };
       if (ctidMap) {
@@ -480,7 +510,7 @@ export class PgEngine {
     // select: データは変更せず、既存行に対して filteredOut を再計算するだけ
     const table = current.tables[stmt.table];
     const next = cloneState(current);
-    const filterMatchedIds = await this.resolveMatchedIds(db, stmt.table, stmt.where);
+    const filterMatchedIds = await this.resolveMatchedIds(db, gen, stmt.table, stmt.where);
 
     next.tables[stmt.table] = {
       ...next.tables[stmt.table],
