@@ -91,6 +91,11 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
   const stateRef = useRef(state);
   stateRef.current = state;
   const prevModeRef = useRef(mode);
+  /** reset() のたびに進む世代。run() と experiment→design の effect は開始時の世代を
+   * 覚えておき、await から戻ったときに変わっていたら、以降の dispatch・再生・UI フラグの
+   * 更新を行わずに抜ける（Issue #73）。処理中は Reset ボタンを押せないが、ボタン操作以外
+   * から run() が始まる経路（起動直後のサイレント自動ロードなど）に備えて持つ。 */
+  const generationRef = useRef(0);
 
   const pushLog = useCallback((line: string) => setLog((l) => [...l, line]), []);
 
@@ -105,17 +110,19 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     if (prevMode !== 'experiment' || mode !== 'design') return;
 
     let cancelled = false;
+    const generation = generationRef.current;
+    const isStale = () => cancelled || generationRef.current !== generation;
     (async () => {
       setModeTransitioning(true);
       try {
         const restored = await engineRef.current!.returnToDesign();
-        if (restored && !cancelled) {
+        if (restored && !isStale()) {
           const events = diffStates(stateRef.current, restored);
           dispatch({ type: 'set', state: restored });
           await playEvents(events);
         }
       } finally {
-        if (!cancelled) setModeTransitioning(false);
+        if (!isStale()) setModeTransitioning(false);
       }
     })();
 
@@ -126,55 +133,71 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
 
   const run = useCallback(
     async (options?: RunOptions) => {
+      const generation = generationRef.current;
+      const isStale = () => generationRef.current !== generation;
       setError(null);
       const engine = engineRef.current!;
       const silent = options?.silent ?? false;
       const effectiveSql = options?.sql ?? sql;
       if (options?.sql !== undefined) setSql(options.sql);
 
-      if (!engine.isReady()) {
-        setInitializing(true);
-        try {
-          await engine.ensureReady();
-        } finally {
-          setInitializing(false);
-        }
-      }
-
-      const { results, parseError } = await engine.run(effectiveSql, WORLD_W, mode);
-      if (parseError) {
-        setError(parseError);
-        return;
-      }
-      if (results.length === 0) {
-        setError('No executable statements found.');
-        return;
-      }
-
+      // playing は再生中だけでなく run() 全体（エンジン起動・SQL 実行・再生）を覆う。
+      // engine.run() の実行中にも Run・Reset・モード切替を押せないようにするため（Issue #73）。
       setPlaying(true);
-      if (!silent) setLog([]);
-      resetAnimation();
+      try {
+        if (!engine.isReady()) {
+          setInitializing(true);
+          try {
+            await engine.ensureReady();
+          } finally {
+            // Reset 後に始まった別の run() が立てた initializing を下ろさない
+            if (!isStale()) setInitializing(false);
+          }
+          if (isStale()) return;
+        }
 
-      for (const r of results) {
-        if (r.error) {
-          setError(r.error);
-          setPlaying(false);
+        const { results, parseError } = await engine.run(effectiveSql, WORLD_W, mode);
+        if (isStale()) return;
+        if (parseError) {
+          setError(parseError);
           return;
         }
-        if (!silent) pushLog(r.label);
-        dispatch({ type: 'set', state: r.state });
-        await playEvents(r.events);
+        if (results.length === 0) {
+          setError('No executable statements found.');
+          return;
+        }
+
+        if (!silent) setLog([]);
+        resetAnimation();
+
+        for (const r of results) {
+          if (r.error) {
+            setError(r.error);
+            return;
+          }
+          if (!silent) pushLog(r.label);
+          dispatch({ type: 'set', state: r.state });
+          await playEvents(r.events);
+          if (isStale()) return;
+        }
+      } finally {
+        if (!isStale()) setPlaying(false);
       }
-      setPlaying(false);
     },
     [sql, mode, pushLog, playEvents, resetAnimation],
   );
 
   const reset = useCallback(() => {
+    // 実行中の run()/モード復帰は次の await から戻った時点で打ち切られ、自分ではフラグを
+    // 下ろさないので、ここで下ろす（Issue #73）。
+    generationRef.current++;
     engineRef.current?.reset();
     dispatch({ type: 'reset' });
     setLog([]);
     setError(null);
+    setPlaying(false);
+    setInitializing(false);
+    setModeTransitioning(false);
     resetAnimation();
   }, [resetAnimation]);
 

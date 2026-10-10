@@ -67,6 +67,10 @@ export default function App() {
     setMode('design');
   };
 
+  // エンジン起動・SQL 実行・再生・モード切替のいずれかの最中。この間はモード切替と
+  // Reset を押せなくする（Reset は全テーブル・実験データを消すため、Issue #73）。
+  const busy = playing || initializing || modeTransitioning;
+
   const verifyMode = localSync.startupMode === 'verify';
 
   const handleSave = async () => {
@@ -92,8 +96,9 @@ export default function App() {
         rowCount={rowCount}
         mode={mode}
         onModeChange={setMode}
-        modeDisabled={playing || initializing || modeTransitioning}
+        modeDisabled={busy}
         onReset={handleReset}
+        resetDisabled={busy}
         localSync={{
           isLocal: localSync.isLocal,
           verifyMode,
