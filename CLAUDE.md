@@ -168,6 +168,18 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    次回実行時に再度コールドスタートが発生する（Issue #71。状態は即座に
    初期化し、旧インスタンスの解放だけを実行中の `run()`/`returnToDesign()`
    の決着後まで遅らせる。`await` できる版が `engine.close()`）。
+   Issue #73 で、Reset は実行中の処理を打ち切るようになった。`PgEngine` は
+   Reset で初期化する状態（`ctidMaps`/`rowSeq`/`lastState`/
+   `inExperimentTx`/`designCheckpoint`）を世代オブジェクトにまとめて
+   `close()` で丸ごと差し替え、`run()`/`returnToDesign()` は開始時の世代に
+   だけ書き込み、`await` から戻ったときに世代が変わっていれば打ち切る
+   （`run()` は `{ results: [], aborted: true }` を返し、新しいインスタンスを
+   起動し直さない）。UI では `playing` が `run()` 全体（エンジン起動・SQL
+   実行・再生）を覆い、`playing || initializing || modeTransitioning` の間は
+   Reset ボタンもモード切替も押せない。`useSqlRunner` の `generationRef` と
+   `useAnimationPlayer` の epoch は、ボタン操作以外から `run()` が始まる経路
+   （起動時のサイレント自動ロードなど）への予防として、Reset 前に始めた
+   `run()`・モード復帰・アニメーション再生を打ち切る。
    `useSqlRunner(initialSql, mode)` は `mode: AppMode`
    （`hooks/useAppMode.ts`、`App.tsx` が所有）を引数に取り、毎回の
    `PgEngine.run()` 呼び出しに転送する。`experiment → design` への遷移を
