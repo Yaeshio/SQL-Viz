@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnimationEvent } from '../types';
 
 /** SELECT ハイライトを表示し続ける時間（Issue #52）。この時間が経過すると
@@ -49,6 +49,10 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
   const [updatingRows, setUpdatingRows] = useState<Set<string>>(new Set());
   const [appearingColumns, setAppearingColumns] = useState<Set<string>>(new Set());
   const [highlight, setHighlight] = useState<AnimationHighlight | null>(null);
+  /** resetAnimation() のたびに進む。再生中の playEvents() は、待ち時間の後でこれが
+   * 変わっていたら残りのイベントを再生せずに抜ける（Issue #73: Reset 時点で再生中だった
+   * タイムラインが、Reset 後に始まった再生の set を書き換えないようにする）。 */
+  const epochRef = useRef(0);
 
   // Issue #52: ハイライトが立っている間だけ自動解除タイマーを張る。diffStates()
   // は再実行のたびに新しい select_highlight イベント（＝新しい highlight
@@ -63,57 +67,62 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
   const dismissHighlight = useCallback(() => setHighlight(null), []);
 
   const playEvents = useCallback(async (events: AnimationEvent[]) => {
+    const epoch = epochRef.current;
     const appearing = new Set<string>();
     const filtering = new Set<string>();
     const updating = new Set<string>();
     const appearingCols = new Set<string>();
     for (const ev of events) {
+      let ms: number;
       switch (ev.kind) {
         case 'table_appear':
-          await delay(120);
+          ms = 120;
           break;
         case 'table_remove':
-          await delay(300);
+          ms = 300;
           break;
         case 'column_add':
           appearingCols.add(columnKey(ev.table, ev.column));
           setAppearingColumns(new Set(appearingCols));
-          await delay(180);
+          ms = 180;
           break;
         case 'column_drop':
-          await delay(180);
+          ms = 180;
           break;
         case 'row_add':
           appearing.add(ev.rowId);
           setAppearingRows(new Set(appearing));
-          await delay(180);
+          ms = 180;
           break;
         case 'row_remove':
-          await delay(250);
+          ms = 250;
           break;
         case 'row_update':
           updating.add(ev.rowId);
           setUpdatingRows(new Set(updating));
-          await delay(300);
+          ms = 300;
           break;
         case 'row_filter':
           filtering.add(ev.rowId);
           setFilteringRows(new Set(filtering));
-          await delay(250);
+          ms = 250;
           break;
         case 'row_unfilter':
           filtering.delete(ev.rowId);
           setFilteringRows(new Set(filtering));
-          await delay(200);
+          ms = 200;
           break;
         case 'select_highlight':
           setHighlight({ table: ev.table, columns: ev.columns });
-          await delay(300);
+          ms = 300;
           break;
       }
+      await delay(ms);
+      if (epochRef.current !== epoch) return;
     }
     // highlight は保持する。一時的な set 群は少し置いてからクリアする
     await delay(400);
+    if (epochRef.current !== epoch) return;
     setAppearingRows(new Set());
     setFilteringRows(new Set());
     setUpdatingRows(new Set());
@@ -121,6 +130,7 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
   }, []);
 
   const resetAnimation = useCallback(() => {
+    epochRef.current++;
     setHighlight(null);
     setAppearingRows(new Set());
     setFilteringRows(new Set());
