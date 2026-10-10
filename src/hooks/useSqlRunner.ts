@@ -132,40 +132,44 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
       const effectiveSql = options?.sql ?? sql;
       if (options?.sql !== undefined) setSql(options.sql);
 
-      if (!engine.isReady()) {
-        setInitializing(true);
-        try {
-          await engine.ensureReady();
-        } finally {
-          setInitializing(false);
-        }
-      }
-
-      const { results, parseError } = await engine.run(effectiveSql, WORLD_W, mode);
-      if (parseError) {
-        setError(parseError);
-        return;
-      }
-      if (results.length === 0) {
-        setError('No executable statements found.');
-        return;
-      }
-
+      // playing は再生中だけでなく run() 全体（エンジン起動・SQL 実行・再生）を覆う。
+      // engine.run() の実行中にも Run・Reset・モード切替を押せないようにするため（Issue #73）。
       setPlaying(true);
-      if (!silent) setLog([]);
-      resetAnimation();
+      try {
+        if (!engine.isReady()) {
+          setInitializing(true);
+          try {
+            await engine.ensureReady();
+          } finally {
+            setInitializing(false);
+          }
+        }
 
-      for (const r of results) {
-        if (r.error) {
-          setError(r.error);
-          setPlaying(false);
+        const { results, parseError } = await engine.run(effectiveSql, WORLD_W, mode);
+        if (parseError) {
+          setError(parseError);
           return;
         }
-        if (!silent) pushLog(r.label);
-        dispatch({ type: 'set', state: r.state });
-        await playEvents(r.events);
+        if (results.length === 0) {
+          setError('No executable statements found.');
+          return;
+        }
+
+        if (!silent) setLog([]);
+        resetAnimation();
+
+        for (const r of results) {
+          if (r.error) {
+            setError(r.error);
+            return;
+          }
+          if (!silent) pushLog(r.label);
+          dispatch({ type: 'set', state: r.state });
+          await playEvents(r.events);
+        }
+      } finally {
+        setPlaying(false);
       }
-      setPlaying(false);
     },
     [sql, mode, pushLog, playEvents, resetAnimation],
   );

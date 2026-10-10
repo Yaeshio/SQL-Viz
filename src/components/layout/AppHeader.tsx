@@ -10,10 +10,20 @@ interface Props {
   onModeChange: (mode: AppMode) => void;
   modeDisabled: boolean;
   onReset: () => void;
+  resetDisabled: boolean;
   localSync: LocalSyncControlsProps;
 }
 
-export default function AppHeader({ tableCount, rowCount, mode, onModeChange, modeDisabled, onReset, localSync }: Props) {
+export default function AppHeader({
+  tableCount,
+  rowCount,
+  mode,
+  onModeChange,
+  modeDisabled,
+  onReset,
+  resetDisabled,
+  localSync,
+}: Props) {
   return (
     <header className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/60 backdrop-blur">
       <div className="flex items-center gap-2.5">
@@ -31,7 +41,9 @@ export default function AppHeader({ tableCount, rowCount, mode, onModeChange, mo
         <span><span className="text-slate-500">rows</span> <span className="font-mono text-slate-200">{rowCount}</span></span>
         <button
           onClick={onReset}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-700 hover:border-slate-500 hover:bg-slate-800 transition text-slate-300"
+          disabled={resetDisabled}
+          title={resetDisabled ? '処理中はリセットできません' : undefined}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-700 hover:border-slate-500 hover:bg-slate-800 transition text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-700 disabled:hover:bg-transparent"
         >
           <Trash2 size={13} /> Reset
         </button>
