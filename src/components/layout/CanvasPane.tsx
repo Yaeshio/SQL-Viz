@@ -10,6 +10,7 @@ interface Props {
   filteringRows: Set<string>;
   updatingRows: Set<string>;
   appearingColumns: Set<string>;
+  hiddenRelations: Set<string>;
   highlight: CanvasHighlight | null;
   onMoveTable: (name: string, x: number, y: number) => void;
   onDismissHighlight: () => void;
@@ -22,6 +23,7 @@ export default function CanvasPane({
   filteringRows,
   updatingRows,
   appearingColumns,
+  hiddenRelations,
   highlight,
   onMoveTable,
   onDismissHighlight,
@@ -49,6 +51,7 @@ export default function CanvasPane({
           filteringRows={filteringRows}
           updatingRows={updatingRows}
           appearingColumns={appearingColumns}
+          hiddenRelations={hiddenRelations}
           highlight={highlight}
           onMoveTable={onMoveTable}
           onDismissHighlight={onDismissHighlight}
