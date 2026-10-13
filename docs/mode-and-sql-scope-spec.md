@@ -67,11 +67,17 @@ Issue #26でローカルCLI経由のファイル同期へ移行し同ドキュ�
   を正とする。`DBState.Column.type` は `normalizeType()` により型が
   丸められているため、`VARCHAR(50)` の長さなどの精度を落とさないため
   である（`src/pglite/ddlExport.ts` の `generateDdl()`）。
-- **範囲**: テーブル定義（列名・型）のみ。制約（`PRIMARY KEY`/
-  `FOREIGN KEY`/`NOT NULL`/`DEFAULT`等）はMVPでは対象外（5節）。FK制約の
-  モデル化・DDL出力・キャンバス描画は
-  [Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45) で追跡する。
-- **テーブルの並び順**: `DBState.order`（画面上のレイアウト順）に従う。
+- **範囲**: テーブル定義（列名・型）に加え、`PRIMARY KEY`/`UNIQUE`/
+  `FOREIGN KEY` を表レベル制約として `CREATE TABLE` 内の列定義の後に出力する
+  （[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)）。Postgres は
+  FK の参照先列に PK/UNIQUE を要求するため、これらを出さないと FK 付き
+  スキーマの Reload が `there is no unique constraint matching given keys` で
+  失敗する（かつ、従来は `id INT PRIMARY KEY` を保存すると PK が黙って脱落して
+  いた）。制約名は出力せず、再生時に Postgres が付ける既定名に任せる。
+  `NOT NULL`/`DEFAULT`/`CHECK` は引き続き対象外（5節）。
+- **テーブルの並び順**: `DBState.order`（作成順）に従う。FK は作成時に参照先が
+  既に存在することを要求し、参照されたテーブルは `CASCADE` なしでは `DROP` できない
+  ため、作成順では参照先が必ず先に来る（トポロジカルソートは行わない）。
 
 ## 4. `ALTER TABLE` のMVPスコープ
 
@@ -85,13 +91,16 @@ Issue #26でローカルCLI経由のファイル同期へ移行し同ドキュ�
 
 ## 5. その他のSQL対応範囲スコープ外事項
 
-- テーブル間のリレーション（外部キー）のモデル化・DDL出力・キャンバス
-  描画。`types.ts` のモデル拡張・パーサー拡張・キャンバス描画を伴う
-  別プロジェクト規模になるため #48（SQL対応拡大 Largeティア）のスコープ外
-  とし、[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45) で追跡する
-  （静的なリレーション表現に限る。JOIN結果クエリの実行・可視化は #48）。
-- `PRIMARY KEY`/`FOREIGN KEY`/`NOT NULL`/`DEFAULT` 等の制約定義
-  （3節）。
+- 制約定義のうち `NOT NULL`/`DEFAULT`/`CHECK` 等（3節）。`PRIMARY KEY`/
+  `UNIQUE`/`FOREIGN KEY` は [Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)
+  でスコープ内とした（パース許可と DDL 出力。FK はさらにモデル化
+  （`Column.references`/`DBState.relations`）とキャンバスのコネクタ描画まで）。
+  #45 の範囲でも以下は対象外で、いずれも `Unsupported clause` として拒否する:
+  複数列の FK、`ON DELETE`/`ON UPDATE`/`MATCH`（実行は PGlite だが `DBState` が
+  連鎖削除された子行を追跡できず、キャンバスと DB が食い違うため）、スキーマ
+  修飾の参照先、`ALTER TABLE` による FK 追加（4節）。PK/UNIQUE のモデル化・
+  キャンバス描画（バッジ等）とリレーション線の自動レイアウト最適化も対象外。
+  JOIN 結果クエリの実行・可視化は #48。
 - `WHERE` は `SELECT`/`UPDATE`/`DELETE` いずれも単一の `<col> <op>
   <value>` 比較のみ対応（`AND`/`OR`、`JOIN` は非対応）。対応SQL文の
   全体像・選定理由は [`docs/user-stories.md`](./user-stories.md) を

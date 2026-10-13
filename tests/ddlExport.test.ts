@@ -62,3 +62,101 @@ describe('generateDdl', () => {
     expect(ddl).toBe('');
   });
 });
+
+/** 生成した DDL を新しい PgEngine へ流し込み、同じ DDL が再生成されることを確認する
+ * （ラウンドトリップ）。成功すれば再生した engine を渡して `check` を呼ぶ。 */
+async function roundTrip(
+  ddl: string,
+  order: string[],
+  check?: (replayed: PgEngine) => Promise<void>,
+): Promise<void> {
+  const replayed = new PgEngine();
+  try {
+    const { results, parseError } = await replayed.run(ddl, CANVAS_W, 'design');
+    expect(parseError).toBeUndefined();
+    expect(results.find((r) => r.error)?.error).toBeUndefined();
+    expect(await generateDdl(replayed.getDb()!, order)).toBe(ddl);
+    await check?.(replayed);
+  } finally {
+    await replayed.close();
+  }
+}
+
+describe('generateDdl — 制約（Issue #45）', () => {
+  it('DDL-06: PRIMARY KEY / UNIQUE / FOREIGN KEY を表レベル制約として列定義の後に出力する', async () => {
+    await engine.run('CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE)', CANVAS_W, 'design');
+    await engine.run('CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id))', CANVAS_W, 'design');
+    const ddl = await generateDdl(engine.getDb()!, ['users', 'posts']);
+    expect(ddl).toBe(
+      [
+        'CREATE TABLE "users" (',
+        '  "id" INT,',
+        '  "email" TEXT,',
+        '  PRIMARY KEY ("id"),',
+        '  UNIQUE ("email")',
+        ');',
+        '',
+        'CREATE TABLE "posts" (',
+        '  "id" INT,',
+        '  "user_id" INT,',
+        '  PRIMARY KEY ("id"),',
+        '  FOREIGN KEY ("user_id") REFERENCES "users" ("id")',
+        ');',
+      ].join('\n'),
+    );
+  });
+
+  it('DDL-07 (ラウンドトリップ): FK 付きスキーマを保存→Reload しても同じ DDL が再生成される', async () => {
+    await engine.run('CREATE TABLE users (id INT PRIMARY KEY, name TEXT)', CANVAS_W, 'design');
+    await engine.run('CREATE TABLE posts (id INT PRIMARY KEY, user_id INT REFERENCES users(id))', CANVAS_W, 'design');
+    const ddl = await generateDdl(engine.getDb()!, ['users', 'posts']);
+    await roundTrip(ddl, ['users', 'posts']);
+  });
+
+  it('DDL-08 (ラウンドトリップ): 複合 PRIMARY KEY + 複数 FK の中間テーブルも往復できる', async () => {
+    await engine.run('CREATE TABLE students (id INT PRIMARY KEY)', CANVAS_W, 'design');
+    await engine.run('CREATE TABLE courses (id INT UNIQUE)', CANVAS_W, 'design');
+    await engine.run(
+      `CREATE TABLE enrollments (
+         student_id INT, course_id INT,
+         PRIMARY KEY (student_id, course_id),
+         FOREIGN KEY (student_id) REFERENCES students(id),
+         FOREIGN KEY (course_id) REFERENCES courses(id)
+       )`,
+      CANVAS_W,
+      'design',
+    );
+    const order = ['students', 'courses', 'enrollments'];
+    const ddl = await generateDdl(engine.getDb()!, order);
+    expect(ddl).toContain('PRIMARY KEY ("student_id", "course_id")');
+    expect(ddl).toContain('FOREIGN KEY ("student_id") REFERENCES "students" ("id")');
+    expect(ddl).toContain('FOREIGN KEY ("course_id") REFERENCES "courses" ("id")');
+    await roundTrip(ddl, order);
+  });
+
+  it('DDL-09 (ラウンドトリップ): 自己参照 FK も往復できる', async () => {
+    await engine.run('CREATE TABLE emp (id INT PRIMARY KEY, mgr INT REFERENCES emp(id))', CANVAS_W, 'design');
+    const ddl = await generateDdl(engine.getDb()!, ['emp']);
+    expect(ddl).toContain('FOREIGN KEY ("mgr") REFERENCES "emp" ("id")');
+    await roundTrip(ddl, ['emp']);
+  });
+
+  it('DDL-10: Reload 後も PRIMARY KEY が効いている（保存で PK が黙って脱落しない）', async () => {
+    await engine.run('CREATE TABLE users (id INT PRIMARY KEY, name TEXT)', CANVAS_W, 'design');
+    const ddl = await generateDdl(engine.getDb()!, ['users']);
+    await roundTrip(ddl, ['users'], async (replayed) => {
+      const { results } = await replayed.run("INSERT INTO users VALUES (1, 'a'), (1, 'dup')", CANVAS_W, 'experiment');
+      expect(results[0].error).toMatch(/duplicate key/);
+    });
+  });
+
+  it('DDL-11: Reload 後も FK が効いている（存在しない親を指す INSERT は拒否される）', async () => {
+    await engine.run('CREATE TABLE users (id INT PRIMARY KEY)', CANVAS_W, 'design');
+    await engine.run('CREATE TABLE posts (id INT, user_id INT REFERENCES users(id))', CANVAS_W, 'design');
+    const ddl = await generateDdl(engine.getDb()!, ['users', 'posts']);
+    await roundTrip(ddl, ['users', 'posts'], async (replayed) => {
+      const { results } = await replayed.run('INSERT INTO posts VALUES (1, 99)', CANVAS_W, 'experiment');
+      expect(results[0].error).toMatch(/foreign key constraint/);
+    });
+  });
+});

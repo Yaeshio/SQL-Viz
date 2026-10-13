@@ -34,11 +34,95 @@ describe('parseSql — CREATE TABLE', () => {
     ['IF NOT EXISTS', 'CREATE TABLE IF NOT EXISTS a (id INT)'],
     ['AS SELECT', 'CREATE TABLE a AS SELECT * FROM b'],
     ['INDEX定義', 'CREATE TABLE a (id INT, INDEX idx_id (id))'],
-    ['FOREIGN KEY制約', 'CREATE TABLE a (id INT, FOREIGN KEY (id) REFERENCES b(id))'],
+    ['CHECK制約', 'CREATE TABLE a (id INT, CHECK (id > 0))'],
   ])('%s を含むCREATE TABLEはエラーになる', (_label, sql) => {
     const { statements, error } = parseSql(sql);
     expect(statements).toEqual([]);
     expect(error).toMatch(/^Unsupported clause: /);
+  });
+});
+
+describe('parseSql — CREATE TABLE の制約（Issue #45）', () => {
+  const parseColumns = (sql: string) => {
+    const { statements, error } = parseSql(sql);
+    expect(error).toBeUndefined();
+    return (statements[0] as ParsedCreate).columns;
+  };
+
+  it('PARSE-FK-01: 列レベルの REFERENCES が該当列の references になる', () => {
+    expect(parseColumns('CREATE TABLE b (id INT, a_id INT REFERENCES a(id))')).toEqual([
+      { name: 'id', type: 'INT' },
+      { name: 'a_id', type: 'INT', references: { table: 'a', column: 'id' } },
+    ]);
+  });
+
+  it('PARSE-FK-02: 表レベルの FOREIGN KEY が該当列の references になる', () => {
+    expect(parseColumns('CREATE TABLE b (id INT, a_id INT, FOREIGN KEY (a_id) REFERENCES a(id))')).toEqual([
+      { name: 'id', type: 'INT' },
+      { name: 'a_id', type: 'INT', references: { table: 'a', column: 'id' } },
+    ]);
+  });
+
+  it('PARSE-FK-03: CONSTRAINT 名付きの FOREIGN KEY も受理される（名前はモデル化しない）', () => {
+    expect(
+      parseColumns('CREATE TABLE b (a_id INT, CONSTRAINT fk_a FOREIGN KEY (a_id) REFERENCES a(id))'),
+    ).toEqual([{ name: 'a_id', type: 'INT', references: { table: 'a', column: 'id' } }]);
+  });
+
+  it('PARSE-FK-04: 自己参照の FK も受理される', () => {
+    expect(parseColumns('CREATE TABLE emp (id INT PRIMARY KEY, mgr INT REFERENCES emp(id))')[1].references).toEqual({
+      table: 'emp',
+      column: 'id',
+    });
+  });
+
+  it('PARSE-FK-05: 引用符付き識別子（DDL 出力の形式）の FOREIGN KEY を受理する', () => {
+    expect(
+      parseColumns('CREATE TABLE "posts" ("id" INT, "user_id" INT, FOREIGN KEY ("user_id") REFERENCES "users" ("id"))')[1],
+    ).toEqual({ name: 'user_id', type: 'INT', references: { table: 'users', column: 'id' } });
+  });
+
+  it('PARSE-FK-06: FK の対象列名は大文字小文字を区別せず列定義と突き合わせる', () => {
+    expect(parseColumns('CREATE TABLE b (A_ID INT, FOREIGN KEY (a_id) REFERENCES a(id))')[0].references).toEqual({
+      table: 'a',
+      column: 'id',
+    });
+  });
+
+  it.each([
+    ['列レベルの ON DELETE', 'CREATE TABLE b (a_id INT REFERENCES a(id) ON DELETE CASCADE)'],
+    ['列レベルの ON UPDATE', 'CREATE TABLE b (a_id INT REFERENCES a(id) ON UPDATE SET NULL)'],
+    ['表レベルの ON DELETE', 'CREATE TABLE b (a_id INT, FOREIGN KEY (a_id) REFERENCES a(id) ON DELETE CASCADE)'],
+    ['MATCH FULL', 'CREATE TABLE b (a_id INT, FOREIGN KEY (a_id) REFERENCES a(id) MATCH FULL)'],
+    ['複数列の FOREIGN KEY', 'CREATE TABLE b (x INT, y INT, FOREIGN KEY (x, y) REFERENCES a(p, q))'],
+    ['スキーマ修飾の参照先', 'CREATE TABLE b (a_id INT REFERENCES s.a(id))'],
+    ['存在しない列への FOREIGN KEY', 'CREATE TABLE b (id INT, FOREIGN KEY (zzz) REFERENCES a(id))'],
+    ['同一列への FK の二重指定', 'CREATE TABLE b (a_id INT REFERENCES a(id), FOREIGN KEY (a_id) REFERENCES c(id))'],
+  ])('PARSE-FK-07: %s はエラーになる', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Unsupported clause: /);
+  });
+
+  it('PARSE-FK-08: REFERENCES の列省略は構文エラー（Parse error）になる', () => {
+    const { statements, error } = parseSql('CREATE TABLE b (a_id INT REFERENCES a)');
+    expect(statements).toEqual([]);
+    expect(error).toMatch(/^Parse error: /);
+  });
+
+  it.each([
+    ['列レベルの PRIMARY KEY', 'CREATE TABLE t (id INT PRIMARY KEY)'],
+    ['列レベルの UNIQUE', 'CREATE TABLE t (email TEXT UNIQUE)'],
+    ['表レベルの PRIMARY KEY', 'CREATE TABLE t (id INT, PRIMARY KEY (id))'],
+    ['表レベルの複合 PRIMARY KEY', 'CREATE TABLE t (a INT, b INT, PRIMARY KEY (a, b))'],
+    ['表レベルの UNIQUE', 'CREATE TABLE t (email TEXT, UNIQUE (email))'],
+    ['CONSTRAINT 名付きの PRIMARY KEY', 'CREATE TABLE t (id INT, CONSTRAINT pk_t PRIMARY KEY (id))'],
+  ])('PARSE-KEY-01: %s は受理され、列はモデル化されない（references なし）', (_label, sql) => {
+    const { statements, error } = parseSql(sql);
+    expect(error).toBeUndefined();
+    for (const c of (statements[0] as ParsedCreate).columns) {
+      expect(c).not.toHaveProperty('references');
+    }
   });
 });
 

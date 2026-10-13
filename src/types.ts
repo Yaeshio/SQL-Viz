@@ -4,9 +4,18 @@ export type ColumnType = 'INT' | 'VARCHAR' | 'TEXT' | 'BOOLEAN' | 'DATE' | 'UNKN
  * 対するデータのみの読み書き（SELECT/INSERT/UPDATE/DELETE）。 */
 export type AppMode = 'design' | 'experiment';
 
+/** 外部キーの参照先（Issue #45）。単一列 FK のみ。 */
+export interface ColumnReference {
+  table: string;
+  column: string;
+}
+
 export interface Column {
   name: string;
   type: ColumnType;
+  /** この列が外部キーであるとき、その参照先。リレーションの真実の源はこれで、
+   * DBState.relations はここから導出される（reducer.ts の deriveRelations）。 */
+  references?: ColumnReference;
 }
 
 export interface Row {
