@@ -123,7 +123,9 @@ SQL 文・句が どう扱われるかを調査した結果、初期実装では
   （`AND`/`OR`/`LIKE`/`IN`/`BETWEEN`/`IS NULL`/列同士の比較）、`UNION`、`DISTINCT`、
   `HAVING`、`GROUP BY`/`ORDER BY`/`LIMIT`、`WITH`句(CTE)、`FROM`句のサブクエリ、
   集約関数・エイリアス付き列（例: `COUNT(*)`）
-- `CREATE TABLE`: `IF NOT EXISTS`、`AS SELECT`、`INDEX`/`FOREIGN KEY`等の制約定義
+- `CREATE TABLE`: `IF NOT EXISTS`、`AS SELECT`、`INDEX`/`CHECK`等の制約定義（`PRIMARY KEY`/
+  `UNIQUE`/単一列の `FOREIGN KEY` は Issue #45 で対応済み。複数列 FK・`ON DELETE`/
+  `ON UPDATE`/`MATCH` は `Unsupported clause`）
 - `INSERT`: `INSERT ... SELECT`、`ON DUPLICATE KEY UPDATE`
 
 5節の該当シナリオ（旧 C-1/C-2 区分の SMOKE-11〜16）は、この変更を反映し、いずれも

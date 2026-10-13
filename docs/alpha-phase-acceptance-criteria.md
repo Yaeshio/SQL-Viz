@@ -137,6 +137,19 @@ SQL-Vizのα版検証は「フェーズA: ワークフロー体験 → フェー
   `docs/smoke-test-spec.md` のSMOKE-15（複合WHERE）を「`Unsupported clause`エラーを期待」から
   「正常実行を期待」へ更新する（同ドキュメント4節に既に記載されている想定移行。
   SMOKE-14はJOIN=Largeティアのため対象外）。
+- **FKリレーション線**（[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)、
+  段階実装案 C-2。Largeティアの前提依存）: ロジック層（`parser.ts`/`pglite/engine.ts`/
+  `diff.ts`/`pglite/ddlExport.ts`/`lib/canvasLayout.ts`）は `tests/` の vitest で検証する
+  （`parser.test.ts`・`engine.relation.test.ts`・`diff.relation.test.ts`・
+  `events.relation.test.ts`・`ddlExport.test.ts`・`canvasLayout.test.ts`）。
+  ただし描画はブラウザを介すため例外的に `tools/acceptance-check` の
+  `--phase=C-relation`（`orchestrate-phase-c-relation.mjs`）で自動判定する:
+  コネクタがテーブルの出現後に引かれる／端点がカラム行にある／ドラッグ中にライブ追従する／
+  `DROP TABLE` で消える／参照されている親の `DROP` は Postgres に拒否される／Save した DDL
+  （`PRIMARY KEY`/`FOREIGN KEY` 付き）を新しいページで読み込むと FK が復元される。
+  Save→Reload のラウンドトリップは、`PRIMARY KEY`/`UNIQUE` を出力せず FK だけ出力すると
+  Reload が失敗する（Postgres が参照先列の PK/UNIQUE を要求する）という Issue #45 で見つけた
+  バグの回帰テストを兼ねる。
 - **Largeティア**（JOIN、GROUP BY/集約）:
   [Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)。
   `DBState`/`Row`（1テーブル=1行セット前提）の

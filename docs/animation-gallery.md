@@ -21,7 +21,7 @@ framer-motion のトランジション収束を待ってから撮るため、生
 cd tools/acceptance-check && npm install && cd -
 docker build -t sql-viz-acceptance-check tools/acceptance-check
 
-# docs/assets/animation/*.png を再生成（約20枚。所要 5〜8分）
+# docs/assets/animation/*.png を再生成（約24枚。所要 5〜8分）
 node tools/acceptance-check/orchestrate-phase-c-gallery.mjs
 ```
 
@@ -35,13 +35,15 @@ node tools/acceptance-check/orchestrate-phase-c-gallery.mjs
 ## `CREATE TABLE` — テーブル生成
 
 ```sql
-CREATE TABLE users (id INT, name VARCHAR(50), email VARCHAR(120));
+CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), email VARCHAR(120));
 ```
 
 **生成イベント**: `table_appear`
 
 新しいテーブルカードがキャンバスのグリッド位置にフェードインで出現する。列名と型
 （`INT` / `VARCHAR` など）がヘッダー直下に並ぶ。設計モードでのみ実行可能。
+`PRIMARY KEY` は見た目には現れない（モデル化・描画の対象外）が、次節の外部キーの
+参照先として必要なので、以降の節の `users` はこの定義で作っている。
 
 | 実行前 | 実行後 |
 |---|---|
@@ -98,6 +100,50 @@ DROP TABLE draft_notes;
 | 実行前 | 実行後 |
 |---|---|
 | ![実行前](assets/animation/table-remove-before.png) | ![実行後](assets/animation/table-remove-after.png) |
+
+---
+
+## `CREATE TABLE ... REFERENCES` — 外部キーのコネクタ
+
+```sql
+CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id), total INT);
+```
+
+**生成イベント**: `table_appear` → `relation_add`
+
+新しいテーブルカードが出現したあと、FK 列（`orders.user_id`）の行から参照先の列
+（`users.id`）の行へ、コネクタ線が引かれる。FK 側の端は丸、参照先（PK 側）の端は矢じり。
+線はテーブルカードの背面に描かれ、2 枚のカードが左右に並んでいれば向かい合う辺同士を、
+縦に積まれていたり自己参照だったりすれば右辺同士を C 字で結ぶ。カードをヘッダーで
+ドラッグすると、線は端点をカラム行に保ったままライブで追従する。表レベルの
+`FOREIGN KEY (user_id) REFERENCES users(id)`（`CONSTRAINT 名` 付きも可）でも同じ。
+単一列の FK のみ対応で、参照先の列は Postgres の仕様で `PRIMARY KEY` か `UNIQUE` が必要。
+`ON DELETE`/`ON UPDATE`/`MATCH` は `Unsupported clause`。設計モード限定。
+
+| 実行前 | 実行後 |
+|---|---|
+| ![実行前](assets/animation/relation-add-before.png) | ![実行後](assets/animation/relation-add-after.png) |
+
+---
+
+## `DROP TABLE`（FK を持つ子テーブル）— コネクタの消去
+
+```sql
+DROP TABLE orders;
+```
+
+**生成イベント**: `table_remove` → `relation_remove`
+
+子テーブルのカードが退場アニメーションで消え、同時にコネクタ線も引かれた方向と逆に
+消える。参照されている親テーブル（`DROP TABLE users`）は、`CASCADE` を付けない限り
+Postgres が `cannot drop table users because other objects depend on it` で拒否し、
+キャンバスは変わらない。`DROP TABLE users CASCADE` は FK 制約だけを消すので、子の列は
+残ったまま線だけが消える。FK 列の `ALTER TABLE ... DROP COLUMN` では `column_drop` →
+`relation_remove` になる。設計モード限定。（実行前の画像は直前の節の状態。）
+
+| 実行前 | 実行後 |
+|---|---|
+| ![実行前](assets/animation/relation-remove-before.png) | ![実行後](assets/animation/relation-remove-after.png) |
 
 ---
 

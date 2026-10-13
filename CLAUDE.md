@@ -78,10 +78,17 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
 **ドメインモデル** — `types.ts` が唯一の情報源（single source of truth）。
 `Table`（name、`Column[]`、`Row[]`、グリッド上の `x`/`y`）、`DBState`
 （`tables` レコード、レイアウト/反復順を保持する `order` 配列、
-`lastSelect`、`version` カウンタ）、`AnimationEvent`（`table_appear`,
-`table_remove`, `column_add`, `column_drop`, `row_add`, `row_remove`,
+外部キーの `relations: Relation[]`、`lastSelect`、`version` カウンタ）、
+`AnimationEvent`（`table_appear`, `table_remove`, `column_add`,
+`column_drop`, `relation_add`, `relation_remove`, `row_add`, `row_remove`,
 `row_update`, `row_filter`, `row_unfilter`, `select_highlight`）、
 `AppMode`（`'design' | 'experiment'`。Issue #18 M3、次段落参照）。
+外部キー（Issue #45）の真実の源は `Column.references?: { table; column }`
+（単一列 FK のみ）で、`DBState.relations`（`Relation { id; fromTable;
+fromColumn; toTable; toColumn }`。`id` は `` `${fromTable}.${fromColumn}->${toTable}.${toColumn}` ``
+という端点から決まる決定的な値）は `reducer.ts` の `deriveRelations()` が
+`order` × 列順の `references` から導出する。`PRIMARY KEY`/`UNIQUE` は
+モデル化しない（パース許可と DDL 出力のみ）。
 
 **文分割 → 事前検証 → モードゲート → 実行(PGlite) → スナップショット再構築 →
 レイアウト → 差分 → アニメーション のパイプライン**（`hooks/useSqlRunner.ts`
@@ -96,6 +103,19 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    それ以外の文種・構文はすべてパースエラー（`Unsupported statement type`
    / `Unsupported clause`）になる。`SELECT`/`UPDATE`/`DELETE` の `WHERE` は
    単一の `<col> <op> <value>` 比較のみ対応（`AND`/`OR`、`JOIN` は非対応）。
+   `CREATE TABLE` の制約は Issue #45 で `parseCreateDefinitions()` に整理され、
+   列レベルの `REFERENCES t(col)` と表レベルの `[CONSTRAINT n] FOREIGN KEY (col)
+   REFERENCES t(col)` を `Column.references` に変換する（**単一列のみ**）。
+   `PRIMARY KEY`/`UNIQUE`（列レベル・表レベル、複合可）は Postgres が FK の
+   参照先列に要求し、DDL 出力のラウンドトリップにも要るため明示的に許可するが
+   モデル化はせず PGlite に素通しする。`ON DELETE`/`ON UPDATE`/`MATCH`（実行は
+   PGlite だが `DBState` は連鎖削除された子行を追跡しないため、通すとキャンバスと
+   DB が食い違う）・複数列 FK・スキーマ修飾の参照先・同一列への FK 二重指定・
+   CHECK/INDEX 等その他の表制約は `Unsupported clause`。`ALTER TABLE` による
+   FK 追加（`ADD COLUMN ... REFERENCES`／`ADD CONSTRAINT`）も従来どおり拒否する
+   ため、FK は `CREATE TABLE` 時にしか作られず、参照先は既存テーブルか自己参照のみ
+   （循環は作れない）。`NOT NULL`/`DEFAULT` 等の列レベル制約は従来どおりモデル化せず
+   黙って PGlite に素通しする。
    **ゲートを通過した文を実際に実行するのは PGlite であり、`parser.ts`
    自身は `DBState` を生成しない。**
 3. `pglite/engine.ts` の `MODE_ALLOWED_TYPES` によるモードゲート（Issue #18
@@ -119,9 +139,19 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    （`ADD COLUMN`/`DROP COLUMN`）・`drop`・`update`・`delete` の分岐も
    持つ（Issue #18 M1）。旧 `reducer.ts` の `applyCreateTable` /
    `applyInsert` / `applySelect` はこの一部として置き換えられ、
-   `reducer.ts` 自体は `emptyState` / `cloneState` / `normalizeType`
-   というヘルパー関数のみが残っている（`cloneState` は変更前にテーブル/
-   行をディープコピーする用途で `snapshotAfter()` から呼ばれる）。
+   `reducer.ts` 自体は `emptyState` / `cloneState` / `normalizeType` に加え、
+   Issue #45 の FK 用ヘルパー（`resolveColumnReferences` / `deriveRelations` /
+   `clearReference` / `relationId` / `sameName`）というヘルパー関数のみが
+   残っている（`cloneState` は変更前にテーブル/行をディープコピーする用途で
+   `snapshotAfter()` から呼ばれ、`relations` と各列の `references` もコピーする）。
+   `create`/`alter`/`drop` の分岐は最後に `deriveRelations()` で `relations` を
+   導出し直す（`snapshotAfter()` は構造を PGlite に再問い合わせしないので、
+   FK もパース済み AST 由来。妥当性は先に実行された PGlite が検証済み）。
+   `create` では参照先の表名・列名を、PG が大文字小文字を畳むことに合わせ
+   `resolveColumnReferences()` で実在する名前へ正規化する（自己参照は同一 CREATE の
+   列から解決）。`drop` は他テーブルの列の `references` のうち削除したテーブルを
+   指すものを外す: `DROP TABLE a CASCADE` は参照元の FK 制約だけを消して参照元の
+   列は残すため、外さないと同名テーブルの作り直しで存在しない FK が復活する。
    テーブルごとの `ctid → 安定行ID` のマップを保持することで、Postgres
    の物理的な `ctid` が変わっても文をまたいだ行の同一性を維持する。
    `SELECT` の場合は該当行を配列から除外するのではなく、PGlite へ
@@ -147,18 +177,25 @@ UI層は責務ごとに以下へ分割されている（Issue #4 のリファク
    `(state, wrapWidth)` のまま。
 8. `diff.ts` — `diffStates(old, next)` が変更前後の `DBState` を比較し、
    順序付きの `AnimationEvent[]` を生成する（新規テーブル → 削除テーブル
-   → カラム追加/削除 → 新規行 → 削除行 → 値更新 → フィルタ/解除の変化 →
-   SELECT ハイライトの順）。アニメーションを駆動しているのはこの差分で
+   → カラム追加/削除 → リレーション削除 → リレーション追加（Issue #45。`id`
+   で照合）→ 新規行 → 削除行 → 値更新 → フィルタ/解除の変化 →
+   SELECT ハイライトの順。カラム → リレーション → 行を満たすため、テーブルごとの
+   ループはカラムの変化と行の変化の2パスに分かれている）。アニメーションを駆動しているのはこの差分で
    あり、状態遷移自体は即時かつ純粋である。
 9. `hooks/useSqlRunner.ts` の `run()` が文ごとに
    `hooks/useAnimationPlayer.ts` の `playEvents()` を呼び出す。
    `playEvents()` はこのイベント列を順に処理し、`appearingRows` /
-   `filteringRows` / `updatingRows` / `appearingColumns` / `highlight` と
-   いう React の state を更新しながら `await delay(ms)` を挟んで
+   `filteringRows` / `updatingRows` / `appearingColumns` / `hiddenRelations` /
+   `highlight` という React の state を更新しながら `await delay(ms)` を挟んで
    アニメーションのタイムラインを構築し、完了後に次の文へ進む
-   （`table_remove`/`row_remove`/`column_drop` は `framer-motion` の
-   `AnimatePresence` によるアンマウント時の退場アニメーションに任せる
-   ため、専用のstateを持たない）。`useSqlRunner.ts` は `PgEngine` の
+   （`table_remove`/`row_remove`/`column_drop`/`relation_remove` は
+   `framer-motion` の `AnimatePresence` によるアンマウント時の退場アニメーションに
+   任せるため、専用のstateを持たない）。`hiddenRelations` は逆に「まだ引く順番が
+   来ていないリレーション」の集合で、`playEvents()` は先頭（`dispatch` と同じ
+   ティックなので React がバッチする）で今回の全 `relation_add` の id を登録し、
+   各 `relation_add` の順番で外す。これがないと、テーブルやカラムの出現を待たずに
+   全コネクタが一斉に描かれる（`tools/acceptance-check` の `C-relation` が
+   「テーブルの出現から約120ms後に引かれる」ことを実ブラウザで検証する）。`useSqlRunner.ts` は `PgEngine` の
    インスタンスを `useRef` で1つだけ保持し続け、初回実行時は
    `engine.ensureReady()`（`import('@electric-sql/pglite')` による遅延
    ロード → `new PGlite()` → `await db.waitReady`）を待つ間
@@ -271,7 +308,8 @@ react-zoom-pan-pinchのパン開始判定は `window` への直接の `mousedown
 内部の複製）は `pointerup` で一度だけ `onMoveTable` 経由で更新される。
 手動配置は現段階ではセッション限りで、`PgEngine.reset()`
 （Resetボタン）やページリロードで消える。DDLファイルへの書き出し対象は
-テーブル構造のみのまま変更していない。ALTER ADD/DROP COLUMNで手動配置
+テーブル構造（列名・型）と `PRIMARY KEY`/`UNIQUE`/`FOREIGN KEY` 制約のみで、
+手動配置の位置は含めない（制約の出力は Issue #45）。ALTER ADD/DROP COLUMNで手動配置
 済みテーブルの高さが変わった場合の再配置要否はIssue本文の通り未決の
 まま据え置いている（実装後の使用感確認待ち）。
 
@@ -339,6 +377,27 @@ attribute値でアニメーションは一切介在しないため、拡張時�
 更新するだけで再レンダーは起こさない。ドロップ確定時のレンダーは最後の
 ドラッグレンダーと同じ原点になるためジャンプしない。
 
+Issue #45 で、`CREATE TABLE` の外部キー（`Column.references`/`DBState.relations`）を
+テーブルカードの背面に描くコネクタ層 `components/canvas/RelationLayer.tsx` を追加した
+（このリポジトリ初のテーブル間 `<path>`）。`Canvas.tsx` は `<svg>` 内のグリッド `<rect>`
+と `TABLES_BOUNDS_ID` の `<g>` の間に置く（カードは不透明なので線はカードの背面に隠れ、
+`TABLES_BOUNDS_ID` は実コンテンツ矩形の測定用なのでコネクタを入れない）。端点・ベジェは
+`lib/canvasLayout.ts` の純粋関数 `computeRelationGeometry()`（カラム行の縦中心は
+`computeColumnCenterY()`）で、左右に並んだ2枚（隙間24px以上）は向かい合う辺同士を、
+水平に重なる／自己参照は両端とも右辺から外側へ膨らむ C 字で結ぶ。幾何は親
+（`RelationLayer`）が算出し、`memo` 化した `RelationPath` へプリミティブな props で渡す
+（`AnimatePresence` は退場中の子を最後に渡された props のまま保持するため、子が
+`state.tables` を引くとテーブル削除と同時に消える線の端点が失われる）。
+ドラッグへの追従は、`Canvas.tsx` が元々pointermoveごとに再レンダーされ `worldTables` に
+ドラッグ中のライブ位置が入っているので、それを渡すだけで `memo` 済みの `TableNode` を
+再レンダーせずに実現する（コネクタも同じ `<svg>`/viewBox 内なのでドラッグ時の原点補正の
+追加対応は不要）。FK 側の端は丸、参照先側は矢じり（`marker-end` は `pathLength` の
+アニメーション中も末端に出てしまうため使わず、別の `<path>` で描く）。コネクタは
+`data-testid="relation-connector"` と `data-relation-id`/`data-from-table`/
+`data-from-column`/`data-to-table`/`data-to-column`/`data-x1`/`data-y1`/`data-x2`/`data-y2`
+を持つ。PK/UNIQUE のモデル化・バッジ描画と、線の交差を避ける自動レイアウトは
+スコープ外のまま。
+
 SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`、`ALTER TABLE`
 の `RENAME`/型変更/複数アクション同時指定など）、通常は `parser.ts`
 （許可リストの拡張）、`pglite/engine.ts`（`snapshotAfter()` の文種別
@@ -347,7 +406,7 @@ SQL の対応範囲をさらに広げる場合（例：`JOIN`、複合 `WHERE`�
 拡張は Issue #35 を2ティアに分割した Issue #47（Medium：複合 `WHERE`／
 `ALTER TABLE RENAME`／単一 `ALTER` 文での複数アクション。前提依存なし）と
 Issue #48（Large：`JOIN`／`GROUP BY`・集約。`types.ts` のデータモデル
-再設計が先決で、FK リレーション線描画の Issue #45 を前提依存とする）で
+再設計が先決で、FK リレーション線描画の Issue #45（実装済み）を前提依存とする）で
 追跡している。
 
 ビルド／テスト設定面の補足：`vite.config.ts` は `@electric-sql/pglite` を
@@ -481,10 +540,16 @@ Dockerイメージ上で実行することでホスト環境を汚染せずに�
 
 同ハーネス内の `orchestrate-phase-c-gallery.mjs`（`--phase=C-gallery`、Issue #54）だけは
 pass/fail判定ではなく、[docs/animation-gallery.md](docs/animation-gallery.md) 用の
-「実行前→実行後」スクリーンショット（`docs/assets/animation/*.png`、約20枚）を
+「実行前→実行後」スクリーンショット（`docs/assets/animation/*.png`、約24枚）を
 決定論的に**生成する**のが主目的。SQL対応がIssue #47/#48で拡大し新しい
 `AnimationEvent`・表示挙動が入るたびに、`scenarios/phaseC-gallery.mjs` の `STEPS` へ
 操作を追加して再実行し、`docs/animation-gallery.md` と画像を更新する。
+
+同ハーネスの `orchestrate-phase-c-relation.mjs`（`--phase=C-relation`、Issue #45）は
+FK のコネクタ描画を実 Chromium で自動判定する（テーブルの出現後に引かれる／端点が
+カラム行にある／ドラッグ中にライブ追従する／DROP で消える／親の DROP を PG が拒否する／
+Save した DDL を新しいページで読み込むと FK が復元される）。`SQLVIZ_SCREENSHOT_DIR` を
+指定すると要所のスクリーンショットも書き出す。
 
 ## CI/CD
 

@@ -199,8 +199,9 @@ Save ボタンの活性条件は旧 `GitHubSettingsPanel.canPush` と同じ
 | `localSync.ts` | `tests/localMode.test.ts` | `vi.stubEnv`/`vi.stubGlobal('fetch', ...)`（`tests/pushSchema.test.ts` と同じパターン）。`getStartupMode`/`saveSchemaAs` を含む |
 | `useLocalSync.ts`/UI | — | 単体テストなし。`tools/visual-check/` による目視確認に委ねる（5節参照） |
 
-`generateDdl()`（`tests/ddlExport.test.ts`）は無改修のため既存テストの
-ままで問題ない。
+`generateDdl()`（`tests/ddlExport.test.ts`）は本機能の導入時点では無改修だったが、
+Issue #45 で `pg_constraint` から `PRIMARY KEY`/`UNIQUE`/`FOREIGN KEY` を表レベル制約
+として出力するよう拡張した（FK 付きスキーマの Save→Reload のラウンドトリップのため）。
 
 目視確認では以下を実ブラウザ（Docker上のPlaywright）で確認済み:
 

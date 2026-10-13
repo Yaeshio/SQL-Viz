@@ -80,7 +80,8 @@ const STEPS = [
     key: 'table-appear',
     mode: 'design',
     setup: [],
-    sql: 'CREATE TABLE users (id INT, name VARCHAR(50), email VARCHAR(120));',
+    // id は PRIMARY KEY: 後続の relation-add が参照する（Postgres は FK の参照先に PK/UNIQUE を要求する）。
+    sql: 'CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), email VARCHAR(120));',
   },
   {
     key: 'column-add',
@@ -99,6 +100,20 @@ const STEPS = [
     mode: 'design',
     setup: ['CREATE TABLE draft_notes (id INT, body VARCHAR(200));'],
     sql: 'DROP TABLE draft_notes;',
+  },
+  // 外部キーのコネクタ（Issue #45）。relation-remove で orders ごと消すので、以降の
+  // experiment 系ステップの画像（users だけが載る）は変わらない。
+  {
+    key: 'relation-add',
+    mode: 'design',
+    setup: [],
+    sql: 'CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id), total INT);',
+  },
+  {
+    key: 'relation-remove',
+    mode: 'design',
+    setup: [],
+    sql: 'DROP TABLE orders;',
   },
   {
     key: 'row-add',
