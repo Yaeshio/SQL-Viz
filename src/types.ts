@@ -37,10 +37,25 @@ export interface Table {
   manuallyPositioned?: boolean;
 }
 
+/** テーブル間の外部キー（Issue #45）。FK 側（from）から参照先（to）へ向かう。
+ * 真実の源は各 Column.references で、DBState.relations はそこから導出される
+ * （reducer.ts の deriveRelations）。 */
+export interface Relation {
+  /** `${fromTable}.${fromColumn}->${toTable}.${toColumn}`。端点から決まる決定的な id
+   * なので、diff.ts が行の id と同様に old/next 間で照合できる。 */
+  id: string;
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+}
+
 export interface DBState {
   tables: Record<string, Table>;
   /** レイアウト用に順序付けられたテーブル名のリスト */
   order: string[];
+  /** テーブル間の外部キー。`order` 順 × 列順で並ぶ */
+  relations: Relation[];
   /** 直近に実行された SELECT 文。SELECT ハイライトの駆動に使う */
   lastSelect: {
     table: string;

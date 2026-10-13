@@ -1,6 +1,6 @@
 import { PgEngine } from '../src/pglite/engine';
 import { parseSql } from '../src/parser';
-import type { AnimationEvent, AppMode, Column, ColumnType, DBState, Row, Table } from '../src/types';
+import type { AnimationEvent, AppMode, Column, ColumnType, DBState, Relation, Row, Table } from '../src/types';
 
 const STRUCTURAL_TYPES = new Set(['create', 'alter', 'drop']);
 
@@ -27,10 +27,16 @@ export function makeTable(
   return manuallyPositioned === undefined ? { name, columns, rows, x, y } : { name, columns, rows, x, y, manuallyPositioned };
 }
 
-export function makeState(tables: Table[], order?: string[], lastSelect: DBState['lastSelect'] = null): DBState {
+export function makeState(
+  tables: Table[],
+  order?: string[],
+  lastSelect: DBState['lastSelect'] = null,
+  relations: Relation[] = [],
+): DBState {
   return {
     tables: Object.fromEntries(tables.map((t) => [t.name, t])),
     order: order ?? tables.map((t) => t.name),
+    relations,
     lastSelect,
     version: 0,
   };
