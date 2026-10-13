@@ -82,4 +82,7 @@ export type AnimationEvent =
   | { kind: 'row_update'; table: string; rowId: string }
   | { kind: 'row_filter'; table: string; rowId: string }
   | { kind: 'row_unfilter'; table: string; rowId: string }
-  | { kind: 'select_highlight'; table: string; columns: string[] };
+  | { kind: 'select_highlight'; table: string; columns: string[] }
+  /** 外部キーのコネクタを引く / 消す（Issue #45）。`relationId` は Relation.id。 */
+  | { kind: 'relation_add'; relationId: string }
+  | { kind: 'relation_remove'; relationId: string };

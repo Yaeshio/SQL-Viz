@@ -15,6 +15,9 @@ export interface UseAnimationPlayerResult {
   filteringRows: Set<string>;
   updatingRows: Set<string>;
   appearingColumns: Set<string>;
+  /** まだ引かれていない（`relation_add` の再生待ちの）リレーション id。キャンバスは
+   * これに含まれるコネクタを描画せず、イベントの再生順に 1 本ずつ引く（Issue #45）。 */
+  hiddenRelations: Set<string>;
   highlight: AnimationHighlight | null;
   playEvents: (events: AnimationEvent[]) => Promise<void>;
   resetAnimation: () => void;
@@ -32,11 +35,11 @@ export function columnKey(table: string, column: string): string {
   return `${table}::${column}`;
 }
 
-/** 行/カラムの appear・filter・update・highlight の state を所有し、
+/** 行/カラム/リレーションの appear・filter・update・highlight の state を所有し、
  * AnimationEvent[] のタイムラインを setTimeout で刻まれた delay とともにそれに
  * 対して再生する。
  *
- * table_remove/row_remove/column_drop は自前の state を必要としない: playEvents が
+ * table_remove/row_remove/column_drop/relation_remove は自前の state を必要としない: playEvents が
  * 走る時点で、削除された項目はすでに DBState から消えており（dispatch は
  * playEvents より前に起きる）、framer-motion の AnimatePresence がアンマウント時の
  * 退場トランジションを自動で発火する。これらのケースは、後続のイベント（または
@@ -48,6 +51,7 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
   const [filteringRows, setFilteringRows] = useState<Set<string>>(new Set());
   const [updatingRows, setUpdatingRows] = useState<Set<string>>(new Set());
   const [appearingColumns, setAppearingColumns] = useState<Set<string>>(new Set());
+  const [hiddenRelations, setHiddenRelations] = useState<Set<string>>(new Set());
   const [highlight, setHighlight] = useState<AnimationHighlight | null>(null);
   /** resetAnimation() のたびに進む。再生中の playEvents() は、待ち時間の後でこれが
    * 変わっていたら残りのイベントを再生せずに抜ける（Issue #73: Reset 時点で再生中だった
@@ -72,6 +76,13 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
     const filtering = new Set<string>();
     const updating = new Set<string>();
     const appearingCols = new Set<string>();
+    // 新しいリレーションは、状態の dispatch と同じレンダーから隠しておき（呼び出し側は
+    // dispatch の直後に同期的にこれを呼ぶので React がバッチする）、対応する
+    // relation_add の順番が来たときに引く。こうしないと、テーブルやカラムの出現を
+    // 待たずに全リレーションが一斉に描かれてしまう。
+    const hiddenRel = new Set<string>();
+    for (const ev of events) if (ev.kind === 'relation_add') hiddenRel.add(ev.relationId);
+    if (hiddenRel.size > 0) setHiddenRelations(new Set(hiddenRel));
     for (const ev of events) {
       let ms: number;
       switch (ev.kind) {
@@ -116,6 +127,14 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
           setHighlight({ table: ev.table, columns: ev.columns });
           ms = 300;
           break;
+        case 'relation_add':
+          hiddenRel.delete(ev.relationId);
+          setHiddenRelations(new Set(hiddenRel));
+          ms = 350;
+          break;
+        case 'relation_remove':
+          ms = 250;
+          break;
       }
       await delay(ms);
       if (epochRef.current !== epoch) return;
@@ -127,6 +146,7 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
     setFilteringRows(new Set());
     setUpdatingRows(new Set());
     setAppearingColumns(new Set());
+    setHiddenRelations(new Set());
   }, []);
 
   const resetAnimation = useCallback(() => {
@@ -136,6 +156,7 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
     setFilteringRows(new Set());
     setUpdatingRows(new Set());
     setAppearingColumns(new Set());
+    setHiddenRelations(new Set());
   }, []);
 
   return {
@@ -143,6 +164,7 @@ export function useAnimationPlayer(): UseAnimationPlayerResult {
     filteringRows,
     updatingRows,
     appearingColumns,
+    hiddenRelations,
     highlight,
     playEvents,
     resetAnimation,
