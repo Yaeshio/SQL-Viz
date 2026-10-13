@@ -61,12 +61,17 @@ export async function generateDdl(db: PGlite, order: string[]): Promise<string> 
   const statements: string[] = [];
 
   for (const table of order) {
+    // state.order のキーは入力どおりの大文字小文字（例: `Users`）だが、PG のカタログ上は
+    // 畳まれた名前（`users`）で、quoteIdent() も同じく小文字化する。カタログへの
+    // 問い合わせも小文字で行わないと、列も制約も 0 件になり、参照先を失った FK だけが
+    // 出力されて Reload が壊れる。
+    const pgName = table.toLowerCase();
     const { rows } = await db.query<InformationSchemaColumn>(
       `SELECT column_name, data_type, character_maximum_length
        FROM information_schema.columns
        WHERE table_schema = 'public' AND table_name = $1
        ORDER BY ordinal_position`,
-      [table],
+      [pgName],
     );
 
     // attname::text で text[] にして、PGlite が JS 配列として返すようにする。
@@ -85,7 +90,7 @@ export async function generateDdl(db: PGlite, order: string[]): Promise<string> 
        LEFT JOIN pg_class fc ON fc.oid = con.confrelid
        WHERE n.nspname = 'public' AND c.relname = $1 AND con.contype IN ('p', 'u', 'f')
        ORDER BY CASE con.contype WHEN 'p' THEN 0 WHEN 'u' THEN 1 ELSE 2 END, con.oid`,
-      [table],
+      [pgName],
     );
 
     const columnLines = rows.map((col) => `  ${quoteIdent(col.column_name)} ${formatColumnType(col)}`);

@@ -159,4 +159,27 @@ describe('generateDdl — 制約（Issue #45）', () => {
       expect(results[0].error).toMatch(/foreign key constraint/);
     });
   });
+
+  it('DDL-12 (ラウンドトリップ): 大文字小文字混在のテーブル名でも列・PK・FK が落ちない', async () => {
+    await engine.run('CREATE TABLE Users (Id INT PRIMARY KEY, Name TEXT)', CANVAS_W, 'design');
+    await engine.run('CREATE TABLE Posts (user_id INT REFERENCES users(id))', CANVAS_W, 'design');
+    const order = engine.getState().order;
+    expect(order).toEqual(['Users', 'Posts']);
+    const ddl = await generateDdl(engine.getDb()!, order);
+    expect(ddl).toBe(
+      [
+        'CREATE TABLE "users" (',
+        '  "id" INT,',
+        '  "name" TEXT,',
+        '  PRIMARY KEY ("id")',
+        ');',
+        '',
+        'CREATE TABLE "posts" (',
+        '  "user_id" INT,',
+        '  FOREIGN KEY ("user_id") REFERENCES "users" ("id")',
+        ');',
+      ].join('\n'),
+    );
+    await roundTrip(ddl, ['users', 'posts']);
+  });
 });
