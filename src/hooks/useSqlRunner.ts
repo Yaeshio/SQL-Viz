@@ -46,6 +46,7 @@ export interface UseSqlRunnerResult {
   filteringRows: Set<string>;
   updatingRows: Set<string>;
   appearingColumns: Set<string>;
+  hiddenRelations: Set<string>;
   highlight: AnimationHighlight | null;
   run: (options?: RunOptions) => Promise<void>;
   reset: () => void;
@@ -81,6 +82,7 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     filteringRows,
     updatingRows,
     appearingColumns,
+    hiddenRelations,
     highlight,
     playEvents,
     resetAnimation,
@@ -226,6 +228,7 @@ export function useSqlRunner(initialSql: string, mode: AppMode): UseSqlRunnerRes
     filteringRows,
     updatingRows,
     appearingColumns,
+    hiddenRelations,
     highlight,
     run,
     reset,

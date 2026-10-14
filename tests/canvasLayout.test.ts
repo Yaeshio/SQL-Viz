@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampPan,
+  computeColumnCenterY,
   computeFitTransform,
+  computeRelationGeometry,
   computeTableInnerLayout,
   computeWorldBox,
   KEEP_VISIBLE,
@@ -214,5 +216,87 @@ describe('clampPan — ワールドを（ほぼ）画面外へパンさせない
   it('CLAMP-04: keepVisible は引数で上書きできる', () => {
     const r = clampPan({ scale: 1, positionX: 99999, positionY: 0 }, viewport, world, 0);
     expect(r.positionX).toBe(800); // keep 0 → ワールドを端にちょうど接するところまで押せる
+  });
+});
+
+describe('computeColumnCenterY — カラム行の縦中心（Issue #45）', () => {
+  it('RELCOL-01: computeTableInnerLayout の colRows[i].y + ROW_H/2 + table.y と一致する', () => {
+    const t = tableWithShape('t', 4, 2, 10, 200);
+    const { colRows } = computeTableInnerLayout(t);
+    colRows.forEach(({ col, y }) => {
+      expect(computeColumnCenterY(t, col.name)).toBe(t.y + y + ROW_H / 2);
+    });
+  });
+
+  it('RELCOL-02: 存在しないカラムでは null を返す', () => {
+    expect(computeColumnCenterY(tableWithShape('t', 2, 0), 'nope')).toBeNull();
+  });
+});
+
+describe('computeRelationGeometry — コネクタの端点とベジェ（Issue #45）', () => {
+  const GAP = 80;
+
+  it('RELGEO-01: 右側にある参照先へは、from の右辺から to の左辺へ結ぶ', () => {
+    const from = tableWithShape('from', 3, 0, 0, 0);
+    const to = tableWithShape('to', 3, 0, TABLE_W + GAP, 100);
+    const g = computeRelationGeometry(from, 'c1', to, 'c2')!;
+    expect(g).toMatchObject({
+      x1: TABLE_W,
+      y1: computeColumnCenterY(from, 'c1'),
+      x2: TABLE_W + GAP,
+      y2: computeColumnCenterY(to, 'c2'),
+      side1: 1,
+      side2: -1,
+    });
+    expect(g.d).toMatch(/^M [-\d.]+ [-\d.]+ C /);
+  });
+
+  it('RELGEO-02: 左側にある参照先へは、from の左辺から to の右辺へ結ぶ', () => {
+    const from = tableWithShape('from', 3, 0, TABLE_W + GAP, 0);
+    const to = tableWithShape('to', 3, 0, 0, 0);
+    const g = computeRelationGeometry(from, 'c0', to, 'c0')!;
+    expect(g).toMatchObject({ x1: TABLE_W + GAP, x2: TABLE_W, side1: -1, side2: 1 });
+  });
+
+  it('RELGEO-03: 水平方向に重なる（縦に積んだ）テーブルは、両端とも右辺から外側へ結ぶ', () => {
+    const from = tableWithShape('from', 3, 0, 0, 0);
+    const to = tableWithShape('to', 3, 0, 0, 300);
+    const g = computeRelationGeometry(from, 'c0', to, 'c0')!;
+    expect(g).toMatchObject({ x1: TABLE_W, x2: TABLE_W, side1: 1, side2: 1 });
+  });
+
+  it('RELGEO-04: 隙間が小さすぎて並んでいるとみなせないときも、重なり扱い（右辺同士）になる', () => {
+    const from = tableWithShape('from', 3, 0, 0, 0);
+    const to = tableWithShape('to', 3, 0, TABLE_W + 4, 0);
+    expect(computeRelationGeometry(from, 'c0', to, 'c0')).toMatchObject({ side1: 1, side2: 1 });
+  });
+
+  it('RELGEO-05: 自己参照は右辺同士を結ぶ C 字になり、別カラムなら縦に離れた 2 点になる', () => {
+    const t = tableWithShape('t', 3, 0, 40, 40);
+    const g = computeRelationGeometry(t, 'c2', t, 'c0')!;
+    expect(g).toMatchObject({ x1: 40 + TABLE_W, x2: 40 + TABLE_W, side1: 1, side2: 1 });
+    expect(g.y1).not.toBe(g.y2);
+  });
+
+  it('RELGEO-06: 同じカラムを自己参照しても端点は縦にずれ、線が退化しない', () => {
+    const t = tableWithShape('t', 3, 0, 0, 0);
+    const g = computeRelationGeometry(t, 'c1', t, 'c1')!;
+    expect(g.y1).not.toBe(g.y2);
+  });
+
+  it('RELGEO-07: どちらかのカラムが存在しなければ null を返す', () => {
+    const from = tableWithShape('from', 2, 0, 0, 0);
+    const to = tableWithShape('to', 2, 0, 400, 0);
+    expect(computeRelationGeometry(from, 'ghost', to, 'c0')).toBeNull();
+    expect(computeRelationGeometry(from, 'c0', to, 'ghost')).toBeNull();
+  });
+
+  it('RELGEO-08: 端点はテーブルの x/y に追従する（ドラッグ中のライブ位置を渡せる）', () => {
+    const from = tableWithShape('from', 2, 0, 0, 0);
+    const to = tableWithShape('to', 2, 0, 400, 0);
+    const before = computeRelationGeometry(from, 'c0', to, 'c0')!;
+    const moved = computeRelationGeometry({ ...from, y: from.y + 50 }, 'c0', to, 'c0')!;
+    expect(moved.y1).toBe(before.y1 + 50);
+    expect(moved.y2).toBe(before.y2);
   });
 });

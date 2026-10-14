@@ -167,8 +167,11 @@ verifyモードでの拒否）・ISO8601タイムスタンプを含む。`GET /a
   の書き出しについては、Issue #33 /
   [docs/agent-proposal-workflow-spec.md](./agent-proposal-workflow-spec.md)
   を参照（本節の対象外規定とは別の経路であり矛盾しない）。
-- テーブル間のリレーション（外部キー）のモデル化・DDL出力（本機能導入前
-  からのスコープ外）。
+- ~~テーブル間のリレーション（外部キー）のモデル化・DDL出力（本機能導入前
+  からのスコープ外）~~ — [Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)
+  で対応済み。Save が書き出す `schema/ddl.sql` には `PRIMARY KEY`/`UNIQUE`/
+  `FOREIGN KEY` が表レベル制約として含まれる
+  （[mode-and-sql-scope-spec.md](./mode-and-sql-scope-spec.md) 3節）。
 
 ## 7. 参照
 

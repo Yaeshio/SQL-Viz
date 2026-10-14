@@ -2,8 +2,9 @@ import type { AnimationEvent, DBState } from './types';
 
 /**
  * 変更前後の DBState を比較し、順序付きのアニメーションイベント列を生成する。
- * 順序: テーブルの出現 → テーブルの削除 → テーブルごと（next.order 順）の
- * カラム追加/削除・行追加/削除・行の値更新・フィルタ変化 → SELECT ハイライト。
+ * 順序: テーブルの出現 → テーブルの削除 → テーブルごと（next.order 順）のカラム追加/削除
+ * → リレーションの削除 → 追加（Issue #45。カラムの後・行イベントの前）→ テーブルごと
+ * （next.order 順）の行追加/削除・行の値更新・フィルタ変化 → SELECT ハイライト。
  */
 export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
   const events: AnimationEvent[] = [];
@@ -22,17 +23,13 @@ export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
     }
   }
 
-  // 3. テーブルごとのカラム変化 + 行の追加/削除/更新 + フィルタ変化
+  // 3. テーブルごとのカラムの追加/削除（名前で比較）。まったく新しいテーブルは
+  //    カラムイベントを出さない（table_appear が全カラムを含む）
   for (const name of next.order) {
     const nt = next.tables[name];
     const ot = old.tables[name];
-    if (!ot) {
-      // まったく新しいテーブル: その全行が「追加」扱い
-      nt.rows.forEach((r, i) => events.push({ kind: 'row_add', table: name, rowId: r.id, index: i }));
-      continue;
-    }
+    if (!ot) continue;
 
-    // カラムの追加/削除（名前で比較）
     const oldColNames = new Set(ot.columns.map((c) => c.name));
     const newColNames = new Set(nt.columns.map((c) => c.name));
     nt.columns.forEach((c) => {
@@ -41,6 +38,28 @@ export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
     ot.columns.forEach((c) => {
       if (!newColNames.has(c.name)) events.push({ kind: 'column_drop', table: name, column: c.name });
     });
+  }
+
+  // 4. リレーション（外部キー）の削除 → 追加（id で照合）。端点のテーブル・カラムの
+  //    出現/消滅より後ろに置くことで、線はカラムが揃ってから引かれる
+  const oldRelationIds = new Set(old.relations.map((r) => r.id));
+  const newRelationIds = new Set(next.relations.map((r) => r.id));
+  old.relations.forEach((r) => {
+    if (!newRelationIds.has(r.id)) events.push({ kind: 'relation_remove', relationId: r.id });
+  });
+  next.relations.forEach((r) => {
+    if (!oldRelationIds.has(r.id)) events.push({ kind: 'relation_add', relationId: r.id });
+  });
+
+  // 5. テーブルごとの行の追加/削除/更新 + フィルタ変化
+  for (const name of next.order) {
+    const nt = next.tables[name];
+    const ot = old.tables[name];
+    if (!ot) {
+      // まったく新しいテーブル: その全行が「追加」扱い
+      nt.rows.forEach((r, i) => events.push({ kind: 'row_add', table: name, rowId: r.id, index: i }));
+      continue;
+    }
 
     // 追加: next には在るが old には無い行（id で照合）
     const oldIds = new Set(ot.rows.map((r) => r.id));
@@ -76,7 +95,7 @@ export function diffStates(old: DBState, next: DBState): AnimationEvent[] {
     });
   }
 
-  // 4. SELECT ハイライト
+  // 6. SELECT ハイライト
   if (next.lastSelect) {
     events.push({
       kind: 'select_highlight',

@@ -32,6 +32,15 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
 - `ALTER TABLE ... ADD COLUMN` / `DROP COLUMN`（1文につき単一アクションのみ）
   — カラムのフェードイン／フェードアウト
 - `DROP TABLE`（1文につき単一テーブルのみ）— テーブルの退場アニメーション
+- `CREATE TABLE` の外部キー（列レベル `REFERENCES t(col)` / 表レベル
+  `[CONSTRAINT n] FOREIGN KEY (col) REFERENCES t(col)`、**単一列のみ**）—
+  FK 列から参照先の列へ結ぶコネクタ線をテーブルカードの背面に描画し
+  （線が引かれる／消えるアニメーション付き、テーブルのドラッグにも追従）、
+  `Column.references` / `DBState.relations` としてモデル化する。参照先は
+  Postgres の仕様で `PRIMARY KEY` か `UNIQUE` が必要。`PRIMARY KEY` /
+  `UNIQUE`（複合列可）も受理されるが、モデル化・描画はしない。
+  `ON DELETE` / `ON UPDATE` / `MATCH`、複数列 FK、`ALTER` による FK 追加は
+  非対応（`Unsupported clause`）
 - `UPDATE ... SET ... [WHERE col <op> value]` — 対象セルの値更新アニメーション
 - `DELETE FROM ... [WHERE col <op> value]` — 対象行の退場アニメーション
 - `WHERE` は `SELECT` / `UPDATE` / `DELETE` いずれも
@@ -72,8 +81,8 @@ Postgres がブラウザタブ内だけで動いています。`DBState` はレ�
 - 集計（`GROUP BY`/`HAVING`）・整列（`ORDER BY`）・`LIMIT`・`DISTINCT`
 - サブクエリ・`UNION`・`WITH`句（CTE）・明示的な `BEGIN`/`COMMIT` 文
   （実験モードが内部で使う暗黙のトランザクション／ロールバックとは別物）
-- `CREATE TABLE ... AS SELECT` / `IF NOT EXISTS`、`PRIMARY KEY`/`INDEX`/`FOREIGN KEY`
-  等の制約定義
+- `CREATE TABLE ... AS SELECT` / `IF NOT EXISTS`、`INDEX`/`CHECK` 等の制約定義
+  （`PRIMARY KEY`/`UNIQUE`/単一列の `FOREIGN KEY` は対応済み。上記参照）
 - `INSERT ... SELECT` / `ON DUPLICATE KEY UPDATE`
 - 集約関数・エイリアス付き `SELECT` 列（例: `COUNT(*)`）
 
@@ -127,7 +136,8 @@ SQL文字列
    ↓
 [4] PgEngine.snapshotAfter() — PGlite へクエリし直して DBState を再構築する。
                   create/insert/select に加え alter（ADD/DROP COLUMN）・drop・
-                  update・delete の分岐を持つ。テーブルごとの ctid → 安定行ID の
+                  update・delete の分岐を持つ。create/alter/drop では各列の
+                  references から DBState.relations（外部キー）を導出する。テーブルごとの ctid → 安定行ID の
                   マップで文をまたいだ行の同一性を保つ。SELECT の場合はここで
                   該当行を削除せず filteredOut フラグを反転させるだけ
                   （フェードアウト演出のための設計は PGlite 導入後も同じ）
@@ -137,8 +147,9 @@ SQL文字列
    ↓
 [6] diff.ts     — diffStates(old, next) が新旧の DBState を比較し、順序付き
                   AnimationEvent[]（table_appear/table_remove、column_add/
-                  column_drop、row_add/row_remove/row_update、row_filter/
-                  row_unfilter、select_highlight）を生成する
+                  column_drop、relation_remove/relation_add、row_add/
+                  row_remove/row_update、row_filter/row_unfilter、
+                  select_highlight）を生成する
    ↓
 [7] hooks/useSqlRunner.ts + hooks/useAnimationPlayer.ts
                 — playEvents() がイベントを順に処理し、React state を
@@ -269,7 +280,8 @@ SQL-Viz自身のローカルチェックアウトがなくても（Docker 経由
 src/
   App.tsx           # 画面全体の構成ルート（フック呼び出し＋コンポーネント合成）
   parser.ts         # SQL → AST → Parsed* 型への事前検証・分類（実行はしない）
-  reducer.ts        # DBState の空状態生成・ディープコピー・型正規化のヘルパー
+  reducer.ts        # DBState の空状態生成・ディープコピー・型正規化、FK の参照解決と
+                    # relations 導出（deriveRelations）のヘルパー
                      # （PgEngine が内部で使用。旧 applyCreateTable/applyInsert/
                      #  applySelect は Issue #8（PGlite導入）で削除済み）
   layout.ts         # テーブル同士のグリッドレイアウト計算
@@ -279,7 +291,8 @@ src/
     engine.ts        # PgEngine — 実PostgreSQL（PGlite/WASM）に対する実行・
                       # モードゲート・DBStateスナップショット再構築を担う本体
     splitStatements.ts # セミコロン区切りのSQL文字列を1文ずつに分割
-    ddlExport.ts     # DBState（＋information_schema）→ CREATE TABLE DDL文字列
+    ddlExport.ts     # PGlite（information_schema/pg_constraint）→ CREATE TABLE DDL文字列
+                      # （PRIMARY KEY/UNIQUE/FOREIGN KEY 制約を表レベルで含む）
   constants/
     sampleSql.ts    # 初期表示用のサンプルSQL
   hooks/
@@ -288,7 +301,8 @@ src/
     useAppMode.ts         # 設計/実験モードの状態（App.tsxが所有）
     useLocalSync.ts       # ローカルCLIモードのSave/Reload状態管理
   lib/
-    canvasLayout.ts # テーブル内部（列/行のy座標・セル切り詰め・viewBox）の純粋計算
+    canvasLayout.ts # テーブル内部（列/行のy座標・セル切り詰め・viewBox）と FK コネクタの
+                    # 端点・ベジェの純粋計算
   local/
     apiPlugin.ts       # Vite dev serverプラグイン（GET/POST /api/schema）
     queryApiPlugin.ts  # 同（エージェント向け GET/POST /api/query 等、Issue #27）
@@ -297,7 +311,8 @@ src/
   components/
     layout/         # ヘッダー・キャンバスペイン・ModeToggle（設計/実験モード切替）
     sql-editor/      # SQLエディタペイン・実行ログパネル
-    canvas/          # SVG + framer-motion によるテーブル/行の描画（tableTypeColors.ts 含む）
+    canvas/          # SVG + framer-motion によるテーブル/行の描画（tableTypeColors.ts 含む）と
+                     # 外部キーのコネクタ層（RelationLayer.tsx）
     local/           # ローカルCLIモードのSave/Reloadボタン（LocalSyncControls）
 scripts/
   openLocal.mjs      # `npm run sql-studio` のCLIエントリポイント

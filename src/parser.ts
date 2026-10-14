@@ -4,7 +4,7 @@
 // Vite/esbuild のようには名前付き CJS エクスポートを常に静的検出できるとは限らない。
 import pkg from 'node-sql-parser';
 const { Parser } = pkg;
-import type { Column, WhereClause } from './types';
+import type { Column, ColumnReference, WhereClause } from './types';
 import { normalizeType } from './reducer.ts';
 
 const parser = new Parser();
@@ -150,6 +150,20 @@ function parseWhere(w: unknown): WhereClause | null {
 }
 
 const CREATE_ALLOWED_FIELDS = new Set(['type', 'keyword', 'table', 'create_definitions']);
+// 表制約（PRIMARY KEY / UNIQUE / FOREIGN KEY）ノードで許可するフィールド。`index_type`
+// （USING btree 等）や `index_options` は許可リストに含めない——値が入っていれば拒否される。
+const CONSTRAINT_ALLOWED_FIELDS = new Set([
+  'constraint',
+  'definition',
+  'constraint_type',
+  'keyword',
+  'index',
+  'resource',
+  'reference_definition',
+]);
+// REFERENCES 句。`on_action`（ON DELETE/UPDATE）と `match` は意図的に含めず、下の
+// parseReference() で個別のメッセージで拒否する。
+const REFERENCE_ALLOWED_FIELDS = new Set(['definition', 'table', 'keyword', 'on_action', 'match']);
 const INSERT_ALLOWED_FIELDS = new Set(['type', 'table', 'columns', 'values', 'prefix']);
 const SELECT_ALLOWED_FIELDS = new Set(['type', 'columns', 'from', 'where', 'into', 'options', 'collate']);
 // MVPスコープは単一の ADD COLUMN / DROP COLUMN のみ（mode-and-sql-scope-spec.md 4節）。
@@ -165,6 +179,102 @@ const DROP_ALLOWED_FIELDS = new Set(['type', 'keyword', 'name']);
 const UPDATE_ALLOWED_FIELDS = new Set(['type', 'table', 'set', 'where']);
 // `returning` は許可リストに含めない。`from` は DELETE FROM の対象テーブルを表す必須フィールド。
 const DELETE_ALLOWED_FIELDS = new Set(['type', 'table', 'from', 'where']);
+
+interface ReferenceNode {
+  definition?: unknown[];
+  table?: { db?: string | null; table?: string }[];
+  on_action?: unknown;
+  match?: unknown;
+}
+
+/**
+ * `REFERENCES <table>(<col>)` を FK の参照先へ変換する（Issue #45）。単一列・同一スキーマ
+ * のみ対応。参照アクション（ON DELETE/UPDATE）と MATCH は拒否する: 実行は PGlite が行う
+ * ので CASCADE 等が実際に効くが、DBState は連鎖して消えた子行を追跡しないため、通すと
+ * キャンバスと DB が食い違う。
+ */
+function parseReference(ref: ReferenceNode): ColumnReference {
+  if (!isEmpty(ref.on_action)) throw new UnsupportedClauseError('Unsupported clause: ON DELETE / ON UPDATE');
+  if (!isEmpty(ref.match)) throw new UnsupportedClauseError('Unsupported clause: MATCH');
+  assertNoExtraClauses(ref as Record<string, unknown>, REFERENCE_ALLOWED_FIELDS);
+  const tables = ref.table ?? [];
+  if (tables.length !== 1 || !tables[0].table) {
+    throw new UnsupportedClauseError('Unsupported clause: REFERENCES');
+  }
+  if (tables[0].db) {
+    throw new UnsupportedClauseError('Unsupported clause: REFERENCES with schema-qualified table');
+  }
+  const cols = ref.definition ?? [];
+  if (cols.length !== 1) {
+    throw new UnsupportedClauseError('Unsupported clause: REFERENCES with multiple columns');
+  }
+  return { table: tables[0].table, column: identName((cols[0] as { column: unknown }).column) };
+}
+
+interface CreateDefinitionNode {
+  resource?: string;
+  column?: { column: unknown };
+  definition?: unknown;
+  constraint_type?: string;
+  reference_definition?: ReferenceNode;
+}
+
+/**
+ * `CREATE TABLE` の `create_definitions` を列の配列へ変換する。
+ * - 列定義: 列レベルの `REFERENCES` は `Column.references` に変換する。列レベルの
+ *   `PRIMARY KEY` / `UNIQUE` / `NOT NULL` / `DEFAULT` は従来どおりモデル化せず無視する
+ *   （実行は PGlite がそのまま行う）。
+ * - 表制約: `FOREIGN KEY (col) REFERENCES t(col)` は該当列の `references` に変換する
+ *   （単一列のみ）。`PRIMARY KEY (…)` / `UNIQUE (…)`（複合列可）は FK の参照先として
+ *   必須（Postgres は参照先列に PK/UNIQUE を要求する）で、DDL 出力のラウンドトリップ
+ *   にも要るため許可するが、モデル化はしない。それ以外の表制約・INDEX は拒否する。
+ */
+function parseCreateDefinitions(defs: unknown[]): Column[] {
+  const columns: Column[] = [];
+  const constraints: CreateDefinitionNode[] = [];
+  for (const d of defs) {
+    const def = d as CreateDefinitionNode;
+    if (def.resource === 'column') {
+      const column: Column = {
+        name: identName(def.column!.column),
+        type: normalizeType((def.definition as { dataType: string }).dataType),
+      };
+      if (def.reference_definition) column.references = parseReference(def.reference_definition);
+      columns.push(column);
+    } else if (def.resource === 'constraint') {
+      constraints.push(def);
+    } else {
+      throw new UnsupportedClauseError(`Unsupported clause: ${def.resource ?? 'create_definition'}`);
+    }
+  }
+
+  for (const def of constraints) {
+    const kind = def.constraint_type?.toLowerCase();
+    if (kind !== 'foreign key' && kind !== 'primary key' && kind !== 'unique') {
+      throw new UnsupportedClauseError('Unsupported clause: constraint');
+    }
+    assertNoExtraClauses(def as Record<string, unknown>, CONSTRAINT_ALLOWED_FIELDS);
+    if (kind !== 'foreign key') continue;
+
+    const fkCols = (def.definition as unknown[] | undefined) ?? [];
+    if (fkCols.length !== 1) {
+      throw new UnsupportedClauseError('Unsupported clause: FOREIGN KEY with multiple columns');
+    }
+    if (!def.reference_definition) {
+      throw new UnsupportedClauseError('Unsupported clause: FOREIGN KEY');
+    }
+    const fkName = identName((fkCols[0] as { column: unknown }).column);
+    const target = columns.find((c) => c.name.toLowerCase() === fkName.toLowerCase());
+    if (!target) {
+      throw new UnsupportedClauseError(`Unsupported clause: FOREIGN KEY on unknown column ${fkName}`);
+    }
+    if (target.references) {
+      throw new UnsupportedClauseError('Unsupported clause: multiple FOREIGN KEY on one column');
+    }
+    target.references = parseReference(def.reference_definition);
+  }
+  return columns;
+}
 
 export function parseSql(sql: string): { statements: Parsed[]; error?: string } {
   let ast: unknown;
@@ -189,14 +299,7 @@ export function parseSql(sql: string): { statements: Parsed[]; error?: string } 
           if (!table || !defs) {
             throw new UnsupportedClauseError('Unsupported clause: CREATE TABLE');
           }
-          const columns: Column[] = defs.map((d) => {
-            const def = d as { resource?: string; column?: { column: unknown }; definition?: { dataType: string } };
-            if (def.resource !== 'column') {
-              throw new UnsupportedClauseError(`Unsupported clause: ${def.resource ?? 'create_definition'}`);
-            }
-            return { name: identName(def.column!.column), type: normalizeType(def.definition!.dataType) };
-          });
-          out.push({ type: 'create', table, columns });
+          out.push({ type: 'create', table, columns: parseCreateDefinitions(defs) });
         } else if (node.type === 'insert') {
           assertNoExtraClauses(node, INSERT_ALLOWED_FIELDS);
           const table = (snode as { table?: { table?: string }[] }).table?.[0]?.table;

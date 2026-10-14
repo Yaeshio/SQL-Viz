@@ -3,7 +3,7 @@ import type { AnimationEvent, AppMode, DBState, Row, WhereClause } from '../type
 import { parseSql, type Parsed } from '../parser.ts';
 import { diffStates } from '../diff.ts';
 import { layoutTables } from '../layout.ts';
-import { cloneState, emptyState } from '../reducer.ts';
+import { clearReference, cloneState, deriveRelations, emptyState, resolveColumnReferences, sameName } from '../reducer.ts';
 import { splitStatements } from './splitStatements.ts';
 
 export interface StatementResult {
@@ -402,8 +402,11 @@ export class PgEngine {
   ): Promise<DBState> {
     if (stmt.type === 'create') {
       const next = cloneState(current);
-      next.tables[stmt.table] = { name: stmt.table, columns: stmt.columns, rows: [], x: 0, y: 0 };
+      // FK の参照先は PG が大文字小文字を畳んで解決しているので、実在する表名・列名へ正規化する。
+      const columns = resolveColumnReferences(stmt.columns, stmt.table, current.tables);
+      next.tables[stmt.table] = { name: stmt.table, columns, rows: [], x: 0, y: 0 };
       next.order.push(stmt.table);
+      next.relations = deriveRelations(next);
       next.lastSelect = null;
       next.version++;
       gen.ctidMaps.set(stmt.table, new Map());
@@ -442,6 +445,12 @@ export class PgEngine {
       const next = cloneState(current);
       delete next.tables[stmt.table];
       next.order = next.order.filter((name) => name !== stmt.table);
+      // DROP TABLE ... CASCADE は参照元の FK 制約だけを消し、参照元の列は残す。列に
+      // `references` を残すと、同名テーブルを作り直したときに存在しない FK が復活してしまう。
+      for (const t of Object.values(next.tables)) {
+        t.columns = t.columns.map((c) => (c.references && sameName(c.references.table, stmt.table) ? clearReference(c) : c));
+      }
+      next.relations = deriveRelations(next);
       gen.ctidMaps.delete(stmt.table);
       if (next.lastSelect?.table === stmt.table) next.lastSelect = null;
       next.version++;
@@ -470,6 +479,7 @@ export class PgEngine {
           }),
         };
       }
+      next.relations = deriveRelations(next);
       next.lastSelect = null;
       next.version++;
       return next;

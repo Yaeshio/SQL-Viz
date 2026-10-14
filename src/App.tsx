@@ -26,6 +26,7 @@ export default function App() {
     filteringRows,
     updatingRows,
     appearingColumns,
+    hiddenRelations,
     highlight,
     run,
     reset,
@@ -128,6 +129,7 @@ export default function App() {
           filteringRows={filteringRows}
           updatingRows={updatingRows}
           appearingColumns={appearingColumns}
+          hiddenRelations={hiddenRelations}
           highlight={highlight}
           onMoveTable={moveTable}
           onDismissHighlight={dismissHighlight}

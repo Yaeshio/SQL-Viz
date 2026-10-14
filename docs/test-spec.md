@@ -241,7 +241,7 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 | DIFF-COL-04（M2） | カラム削除で既存行の `values` からキーが消える | `column_drop` のみ（`row_update` は発生しない。理由は上記と同様） |
 | DIFF-ROW-03（M2） | 既存の行が消える | `row_remove` |
 | DIFF-ROW-04（M2） | 同じ `id` の行の値が変わる | `row_update` |
-| DIFF-ORDER-02（M2） | 複数テーブルにまたがり table_remove/column_add/column_drop/row_add/row_remove/row_update が同時に起きる | `table_appear` 群 → `table_remove` 群 →（各テーブルの）`column_add` 群 → `column_drop` 群 → `row_add` 群 → `row_remove` 群 → `row_update` 群 → `row_filter`/`row_unfilter` 群 → `select_highlight` という全体順序が保たれること |
+| DIFF-ORDER-02（M2） | 複数テーブルにまたがり table_remove/column_add/column_drop/row_add/row_remove/row_update が同時に起きる | `table_appear` 群 → `table_remove` 群 →（各テーブルの）`column_add` 群 → `column_drop` 群 → `row_add` 群 → `row_remove` 群 → `row_update` 群 → `row_filter`/`row_unfilter` 群 → `select_highlight` という全体順序が保たれること。Issue #45 以降は、全テーブルのカラム変化の後・行イベントの前に `relation_remove` 群 → `relation_add` 群が入る（`tests/diff.relation.test.ts` の `DIFF-REL-01〜06`: 新規テーブル+FK / 子テーブル削除 / FK列の DROP COLUMN / 変化なし / remove→add の順 / カラム→リレーション→行の順） |
 
 ## 7. イベント生成層（統合層）の検証観点
 
@@ -263,6 +263,7 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 | EVENT-10（M2） | `ALTER TABLE DROP COLUMN` | `column_drop` のみ |
 | EVENT-11（M2） | `UPDATE ... WHERE ...` | `WHERE` に一致した行のみ `row_update` |
 | EVENT-12（M2） | `DELETE ... WHERE ...` | `WHERE` に一致した行のみ `row_remove` |
+| EVENT-REL-01〜05（Issue #45、`tests/events.relation.test.ts`） | FK 付き `CREATE TABLE` / FK を持たない `CREATE TABLE` / 子テーブルの `DROP TABLE` / `DROP TABLE 親 CASCADE` / FK 列の `DROP COLUMN` | それぞれ `table_appear` → `relation_add` / リレーションのイベントなし / `table_remove` → `relation_remove` / 同左 / `column_drop` → `relation_remove` |
 
 ## 8. 現時点でサポートされている SQL 構文に基づく具体的テストケース一覧
 
@@ -287,7 +288,8 @@ reducer 適用 → diffStates」という一連の流れを通した統合的な
 - `JOIN`・複合 `WHERE`（`AND`/`OR`/`LIKE`/`IN`/`BETWEEN`等）・`UNION`・`DISTINCT`・
   `HAVING`・`GROUP BY`/`ORDER BY`/`LIMIT`・`WITH`句(CTE)・`FROM`句のサブクエリ・
   集約関数/エイリアス付き列・`CREATE TABLE ... AS SELECT`・`CREATE TABLE IF NOT EXISTS`・
-  `PRIMARY KEY`/`INDEX`/`FOREIGN KEY`等の制約定義・`INSERT ... SELECT`・
+  `INDEX`/`CHECK`等の制約定義（`PRIMARY KEY`/`UNIQUE`/単一列の `FOREIGN KEY` は
+  Issue #45 で対応済み。複数列 FK・`ON DELETE`/`ON UPDATE`/`MATCH` は非対応）・`INSERT ... SELECT`・
   `INSERT ... ON DUPLICATE KEY UPDATE` は非対応であり、いずれも `parser.ts` が
   `Unsupported clause: <該当フィールド名>` エラーを返す（Issue #3 により、個別の
   構文を都度検知するのではなく、サポート対象の形以外を汎用的に拒否する許可リスト

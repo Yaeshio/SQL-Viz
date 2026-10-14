@@ -111,6 +111,34 @@ node tools/acceptance-check/orchestrate-phase-b-drag.mjs
    （衝突回避パスの確認）」。
 4. devサーバーを停止し、一時ディレクトリを削除。`{"phase": "B-drag", ..., "ok": bool}` を出力。
 
+## 使い方（Phase C: 外部キーのリレーション線、Issue #45）
+
+```bash
+# イメージビルドまでは Phase A と同じ
+node tools/acceptance-check/orchestrate-phase-c-relation.mjs
+
+# 要所のスクリーンショットも欲しいとき（任意。未指定なら何も撮らない）
+SQLVIZ_SCREENSHOT_DIR=/path/to/out node tools/acceptance-check/orchestrate-phase-c-relation.mjs
+```
+
+`orchestrate-phase-b-drag.mjs` と同じ構造で、`fixtures/phaseC-relation-schema.sql`
+（`users`/`posts` の2テーブル、`posts.user_id -> users.id` の FK 1本。参照先は
+`PRIMARY KEY`。初期フィットが scale=1 になる小ささ）の使い捨てコピーを指す
+`sql-studio` dev サーバーを起動し、`sql-viz-acceptance-check` コンテナ
+（`--phase=C-relation`）で次を実 Chromium で自動判定する（`scenarios/phaseC-relation.mjs`）:
+
+1. コネクタ（`data-testid="relation-connector"`）が、`table-node` の出現から約 120ms 後
+   （`relation_add` の再生順）に DOM へ追加される（`MutationObserver` で時刻を記録）。dispatch と
+   同じレンダーで描かれていると差が 0 付近になり失敗する。
+2. 端点が `data-x1/y1/x2/y2` として公開され、FK 列・参照先列のカラム行の中心にある。
+3. `users` のヘッダーをドラッグしている最中（ボタンを離す前）に、端点がライブ位置へ追従する。
+4. `DROP TABLE posts` でコネクタが消える。
+5. 参照されている親の `DROP TABLE users` は Postgres の文言（`other objects depend on it`）で
+   拒否され、状態が変わらない。
+6. Save した `schema.sql` に `PRIMARY KEY ("id")` と `FOREIGN KEY ("user_id") REFERENCES
+   "users" ("id")` が含まれ、`page.reload()` 後の起動時自動ロードで FK が復元される
+   （FK だけ出力して PK を出さないと Reload が失敗する、というバグの回帰）。
+
 ## 使い方（Phase C: 表示例ギャラリー生成、Issue #54）
 
 ```bash
@@ -129,12 +157,13 @@ pass/fail 判定も兼ねる）。
    リポジトリの `docs/assets/animation/` を `/out` に bind mount し、`--out-dir=/out` を渡す
    （コンテナは `--user "$(id -u):$(id -g)"` 相当で実行され、生成 PNG はホスト uid 所有になる）。
 3. シナリオ（`scenarios/phaseC-gallery.mjs`）が 1 ページ内で状態を積み上げながら、
-   `CREATE TABLE` → `ALTER` → `DROP TABLE` → （実験モードへ）`INSERT` → `SELECT` →
+   `CREATE TABLE` → `ALTER` → `DROP TABLE` → FK 付き `CREATE TABLE`／`DROP TABLE`
+   （コネクタの描画・消去）→ （実験モードへ）`INSERT` → `SELECT` →
    `UPDATE` → `DELETE` → （設計モードへ復帰し ROLLBACK 差分再生）を順に実行し、
    各操作の前後で `[data-testid="canvas-pane"]` を撮影する（撮影前に毎回 Fit で
    ズームを正規化し、framer-motion のトランジション収束を待つ）。
 4. devサーバーを停止し一時ディレクトリを削除。`{"phase": "C-gallery", ..., "ok": bool}` を出力。
-   `docs/assets/animation/*.png`（約20枚）が更新される。
+   `docs/assets/animation/*.png`（約24枚）が更新される。
 
 **更新運用**: Issue #47 / #48 等で対応 SQL が拡大したら、`scenarios/phaseC-gallery.mjs` の
 `STEPS` に操作を追加して再実行し、`docs/animation-gallery.md` の該当節と画像を更新する。
@@ -145,7 +174,7 @@ pass/fail 判定も兼ねる）。
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
-| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` / `B-drag` / `C-gallery` |
+| `--phase` | なし（必須） | 実行するシナリオモジュール名（`scenarios/phase<value>.mjs`）。現状 `A-initial` / `A-restart` / `A-verify` / `B-panzoom` / `B-drag` / `C-gallery` / `C-relation` |
 | `--url` | なし（必須） | 対象のsql-studio dev serverのURL |
 | `--schema` | なし（必須） | コンテナ内から見えるスキーマファイルのパス（bind mount先、例: `/workspace/schema.sql`） |
 | `--save-dir` | なし | `A-verify` 専用。検証モードの別名保存先（bind mount先、例: `/workspace/verify-saves`） |

@@ -49,11 +49,12 @@ DBStateは「永続的なスキーマ・データの状態」を表すオブジ�
 ## 5. データモデル定義（TypeScript）
 
 > 以下5〜6章の型定義は初期構想の叩き台であり、そのままの形では実装されて
-> いない。実際に実装された `DBState`/`AnimationEvent`（`table_appear`/
-> `row_add`/`row_filter`/`row_unfilter`/`select_highlight` の5種類のみ）は
-> `src/types.ts` が単一の情報源であり、`relations`（テーブル間のリレーション
-> 線）や `DROP_TABLE`/`GROUP_ROWS`/`MERGE_ROWS` 等、本章が想定していたイベント
-> 種別の大半は現時点で未実装（対応SQL構文自体がPhase 1に留まっているため）。
+> いない。実際に実装された `DBState`/`AnimationEvent` は `src/types.ts` が
+> 単一の情報源。`relations`（テーブル間のリレーション線）は Issue #45 で
+> `DBState.relations`/`Column.references` と `relation_add`/`relation_remove`
+> として実装済み（`DRAW_RELATION`/`REMOVE_RELATION` に相当。`isPrimaryKey`/
+> `isForeignKey` は持たず、FK は `references` の有無で表す）。`GROUP_ROWS`/
+> `MERGE_ROWS` 等のクエリ系イベントの大半は未実装（#48）。
 
 ```typescript
 interface Column {

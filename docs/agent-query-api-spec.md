@@ -182,6 +182,16 @@ interface HistoryEntry {
   ため、`state.tables[名前]`の有無や`columns`配列を直接見るだけで判定でき、
   `events`を経由する必要は薄い。
 
+**外部キー（[Issue #45](https://github.com/Yaeshio/SQL-Viz/issues/45)）**: `DBState`は
+`relations`（`{id, fromTable, fromColumn, toTable, toColumn}`の配列）を持ち、
+各FK列は`state.tables[名前].columns[i].references`（`{table, column}`）も持つ。
+`CREATE TABLE`で追加された/`DROP TABLE`・FK列の`DROP COLUMN`で消えた関係は、それぞれ
+`events`の`relation_add`/`relation_remove`（`relationId`は`relations[i].id`）として現れる。
+FKを持つ`CREATE TABLE`は列レベルの`REFERENCES t(col)`か表レベルの
+`FOREIGN KEY (col) REFERENCES t(col)`（単一列のみ）で、参照先列は`PRIMARY KEY`か
+`UNIQUE`でなければPostgresが拒否する。`ON DELETE`/`ON UPDATE`/`MATCH`・複数列FK・
+`ALTER`によるFK追加は`parseError`（`Unsupported clause`）になる。
+
 **この取り出し規約は単一テーブル前提である。** JOIN等の複数テーブルを
 またぐ文が将来追加された際（[Issue #48](https://github.com/Yaeshio/SQL-Viz/issues/48)、
 本仕様のスコープ外）は、本規約の見直しが必要になる。

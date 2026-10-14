@@ -29,6 +29,85 @@ export function computeTableInnerLayout(table: Table): TableInnerLayout {
   return { colRows, dataRows, dividerY, height };
 }
 
+/** テーブルカード内のカラム定義行の縦方向の中心（ワールド座標）。カラムが無ければ
+ * null。`computeTableInnerLayout()` の `colRows[i].y`（行の上端）+ ROW_H/2 と一致する。 */
+export function computeColumnCenterY(table: Table, columnName: string): number | null {
+  const i = table.columns.findIndex((c) => c.name === columnName);
+  return i < 0 ? null : table.y + HEADER_H + i * ROW_H + ROW_H / 2;
+}
+
+export interface RelationGeometry {
+  /** FK 側（from）の端点 */
+  x1: number;
+  y1: number;
+  /** 参照先（to）の端点 */
+  x2: number;
+  y2: number;
+  /** from / to の端点がカードのどちら側にあるか。+1 = 右辺、-1 = 左辺（線はその外側へ出る） */
+  side1: 1 | -1;
+  side2: 1 | -1;
+  /** SVG の path `d`（3 次ベジェ） */
+  d: string;
+}
+
+/** 左右に並んでいるとみなす、2 枚のカードの間の最小の隙間（ワールド単位）。 */
+const RELATION_SIDE_GAP = 24;
+const CURVE_MIN = 40;
+const CURVE_MAX = 140;
+/** 同じ列を自己参照するときに端点を縦にずらす量（線が退化しないように）。 */
+const SELF_LOOP_SPREAD = 6;
+
+/**
+ * FK 列の行から参照先列の行へ結ぶコネクタの端点とベジェを計算する（Issue #45）。
+ * 端点はカードの左右の辺の、各カラム行の縦中心に置く。
+ * - 左右に並んでいるとき（隙間が RELATION_SIDE_GAP 以上）: 向かい合う辺同士を結ぶ
+ * - 水平方向に重なる／自己参照のとき: 両端とも右辺から外側へ膨らむ C 字で結ぶ
+ * どちらかのカラムが実在しなければ null（例: カラムの DROP 中）。純粋な幾何計算で、
+ * `from`/`to` の x/y にはドラッグ中のライブ位置を渡せる。
+ */
+export function computeRelationGeometry(
+  from: Table,
+  fromColumn: string,
+  to: Table,
+  toColumn: string,
+): RelationGeometry | null {
+  let y1 = computeColumnCenterY(from, fromColumn);
+  let y2 = computeColumnCenterY(to, toColumn);
+  if (y1 === null || y2 === null) return null;
+
+  let x1: number;
+  let x2: number;
+  let side1: 1 | -1;
+  let side2: 1 | -1;
+  let k: number;
+  if (from.x + TABLE_W + RELATION_SIDE_GAP <= to.x) {
+    x1 = from.x + TABLE_W;
+    x2 = to.x;
+    side1 = 1;
+    side2 = -1;
+    k = Math.min(CURVE_MAX, Math.max(CURVE_MIN, (x2 - x1) / 2));
+  } else if (to.x + TABLE_W + RELATION_SIDE_GAP <= from.x) {
+    x1 = from.x;
+    x2 = to.x + TABLE_W;
+    side1 = -1;
+    side2 = 1;
+    k = Math.min(CURVE_MAX, Math.max(CURVE_MIN, (x1 - x2) / 2));
+  } else {
+    x1 = from.x + TABLE_W;
+    x2 = to.x + TABLE_W;
+    side1 = 1;
+    side2 = 1;
+    k = CURVE_MIN + Math.min(80, Math.abs(y2 - y1) * 0.25);
+    if (y1 === y2 && x1 === x2) {
+      y1 -= SELF_LOOP_SPREAD;
+      y2 += SELF_LOOP_SPREAD;
+    }
+  }
+
+  const d = `M ${x1} ${y1} C ${x1 + side1 * k} ${y1}, ${x2 + side2 * k} ${y2}, ${x2} ${y2}`;
+  return { x1, y1, x2, y2, side1, side2, d };
+}
+
 export interface RowCellLayout {
   columnName: string;
   /** このセルの手前の区切り線の x 位置。先頭カラムでは null。 */

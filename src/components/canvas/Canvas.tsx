@@ -6,6 +6,7 @@ import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import type { DBState } from '../../types';
 import { clampPan, computeFitTransform, computeWorldBox } from '../../lib/canvasLayout';
+import RelationLayer from './RelationLayer';
 import TableNode from './TableNode';
 import type { CanvasHighlight } from './TableNode';
 
@@ -30,6 +31,8 @@ interface Props {
   updatingRows: Set<string>;
   /** 今このタイミングで入場アニメーションすべき table+column キー（columnKey() 参照。このティックの ALTER ADD COLUMN） */
   appearingColumns: Set<string>;
+  /** まだ引く順番が来ていない（relation_add の再生待ちの）リレーション id（Issue #45） */
+  hiddenRelations: Set<string>;
   /** 現在 SELECT でハイライトされているテーブルと、その射影カラム */
   highlight: CanvasHighlight | null;
   /** 完了したテーブルのドラッグ（Issue #34）を最終ワールド座標で確定する。 */
@@ -45,6 +48,7 @@ export default function Canvas({
   filteringRows,
   updatingRows,
   appearingColumns,
+  hiddenRelations,
   highlight,
   onMoveTable,
   onDismissHighlight,
@@ -297,6 +301,10 @@ export default function Canvas({
               </pattern>
             </defs>
             <rect x={world.minX} y={world.minY} width={world.width} height={world.height} fill="url(#grid)" />
+            {/* 外部キーのコネクタ（Issue #45）。カードの背面に描くため TABLES_BOUNDS_ID の
+                <g>（実コンテンツ矩形の測定用）の手前・外側に置く。worldTables にはドラッグ中の
+                ライブ位置が入っているので、memo 済みの TableNode を再レンダーせず線が追従する。 */}
+            <RelationLayer tables={worldTables} relations={state.relations} hiddenRelations={hiddenRelations} />
             <g id={TABLES_BOUNDS_ID}>
               <AnimatePresence>
                 {tables.map((t) => (

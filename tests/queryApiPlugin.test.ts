@@ -123,6 +123,36 @@ describe('buildQueryApiPlugin', () => {
     expect(state.order).toEqual([]);
   });
 
+  it('QUERY-API-REL-01: FK 付きDDLのブートストラップが GET /state の relations に反映され、POST /query の events にも relation_add が出る（Issue #45）', async () => {
+    readFile.mockResolvedValue(
+      [
+        'CREATE TABLE "users" (\n  "id" INT,\n  PRIMARY KEY ("id")\n);',
+        'CREATE TABLE "posts" (\n  "id" INT,\n  "user_id" INT,\n  FOREIGN KEY ("user_id") REFERENCES "users" ("id")\n);',
+      ].join('\n\n'),
+    );
+    const handler = getHandler('/abs/schema.sql');
+    await waitForReady(handler);
+
+    const stateRes = makeRes();
+    await handler(makeReq('GET', '/state'), stateRes as never, vi.fn());
+    const { state } = JSON.parse(stateRes.body);
+    expect(state.relations).toEqual([
+      { id: 'posts.user_id->users.id', fromTable: 'posts', fromColumn: 'user_id', toTable: 'users', toColumn: 'id' },
+    ]);
+    expect(state.tables.posts.columns[1].references).toEqual({ table: 'users', column: 'id' });
+
+    const { body } = await runSql(handler, 'CREATE TABLE comments (post_id INT REFERENCES posts(id))');
+    expect(body.parseError).toBeUndefined();
+    expect(body.results[0].error).toMatch(/no unique constraint matching given keys/);
+
+    await runSql(handler, 'DROP TABLE posts');
+    const after = await runSql(handler, 'CREATE TABLE posts2 (id INT PRIMARY KEY, user_id INT REFERENCES users(id))');
+    expect(after.body.results[0].events).toEqual([
+      { kind: 'table_appear', table: 'posts2' },
+      { kind: 'relation_add', relationId: 'posts2.user_id->users.id' },
+    ]);
+  });
+
   it('QUERY-API-04: POST /api/query — 呼び出しをまたいで状態が蓄積する', async () => {
     readFile.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
     const handler = getHandler('/abs/schema.sql');

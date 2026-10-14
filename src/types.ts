@@ -4,9 +4,18 @@ export type ColumnType = 'INT' | 'VARCHAR' | 'TEXT' | 'BOOLEAN' | 'DATE' | 'UNKN
  * 対するデータのみの読み書き（SELECT/INSERT/UPDATE/DELETE）。 */
 export type AppMode = 'design' | 'experiment';
 
+/** 外部キーの参照先（Issue #45）。単一列 FK のみ。 */
+export interface ColumnReference {
+  table: string;
+  column: string;
+}
+
 export interface Column {
   name: string;
   type: ColumnType;
+  /** この列が外部キーであるとき、その参照先。リレーションの真実の源はこれで、
+   * DBState.relations はここから導出される（reducer.ts の deriveRelations）。 */
+  references?: ColumnReference;
 }
 
 export interface Row {
@@ -28,10 +37,25 @@ export interface Table {
   manuallyPositioned?: boolean;
 }
 
+/** テーブル間の外部キー（Issue #45）。FK 側（from）から参照先（to）へ向かう。
+ * 真実の源は各 Column.references で、DBState.relations はそこから導出される
+ * （reducer.ts の deriveRelations）。 */
+export interface Relation {
+  /** `${fromTable}.${fromColumn}->${toTable}.${toColumn}`。端点から決まる決定的な id
+   * なので、diff.ts が行の id と同様に old/next 間で照合できる。 */
+  id: string;
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+}
+
 export interface DBState {
   tables: Record<string, Table>;
   /** レイアウト用に順序付けられたテーブル名のリスト */
   order: string[];
+  /** テーブル間の外部キー。`order` 順 × 列順で並ぶ */
+  relations: Relation[];
   /** 直近に実行された SELECT 文。SELECT ハイライトの駆動に使う */
   lastSelect: {
     table: string;
@@ -58,4 +82,7 @@ export type AnimationEvent =
   | { kind: 'row_update'; table: string; rowId: string }
   | { kind: 'row_filter'; table: string; rowId: string }
   | { kind: 'row_unfilter'; table: string; rowId: string }
-  | { kind: 'select_highlight'; table: string; columns: string[] };
+  | { kind: 'select_highlight'; table: string; columns: string[] }
+  /** 外部キーのコネクタを引く / 消す（Issue #45）。`relationId` は Relation.id。 */
+  | { kind: 'relation_add'; relationId: string }
+  | { kind: 'relation_remove'; relationId: string };
